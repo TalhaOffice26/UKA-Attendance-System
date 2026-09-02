@@ -23,7 +23,6 @@ mongoose.connect(mongoURI)
 let isWhatsAppReady = false;
 let currentQRCodeDataUrl = null;
 
-// প্রজেক্ট ক্যাশ ও লিনাক্স ডিরেক্টরি থেকে ক্রোম পাথ খোঁজা
 function getExecutablePath() {
   if (process.env.PUPPETEER_EXECUTABLE_PATH && fs.existsSync(process.env.PUPPETEER_EXECUTABLE_PATH)) {
     return process.env.PUPPETEER_EXECUTABLE_PATH;
@@ -92,13 +91,9 @@ const waClient = new Client({
   }
 });
 
-// কিউআর কোড পাওয়ার ইভেন্ট
 waClient.on('qr', async (qr) => {
   try {
-    currentQRCodeDataUrl = await QRCode.toDataURL(qr, {
-      margin: 2,
-      width: 280
-    });
+    currentQRCodeDataUrl = await QRCode.toDataURL(qr, { margin: 2, width: 280 });
     isWhatsAppReady = false;
     console.log('📱 New WhatsApp QR Code generated for web portal.');
   } catch (err) {
@@ -106,31 +101,27 @@ waClient.on('qr', async (qr) => {
   }
 });
 
-// অথেনটিকেশন সফল হওয়া মাত্রই কিউআর কোড রিমুভ ও স্টেট একটিভ
 waClient.on('authenticated', () => {
   console.log('🔐 WhatsApp Authenticated successfully!');
   currentQRCodeDataUrl = null;
-  isWhatsAppReady = true;
 });
 
-// হোয়াটসঅ্যাপ ড্যাশবোর্ড রেডি হওয়া
+// ready ইভেন্ট আসার পরই getChat সহ অভ্যন্তরীণ স্ক্রিপ্ট সচল হয়
 waClient.on('ready', () => {
   isWhatsAppReady = true;
   currentQRCodeDataUrl = null;
   console.log('\n✅ WhatsApp Connected & Ready to send Attendance Alerts!\n');
 });
 
-// লোডিং স্ক্রিন
 waClient.on('loading_screen', (percent, message) => {
   console.log(`⏳ WhatsApp Loading: ${percent}% - ${message}`);
   currentQRCodeDataUrl = null;
-  isWhatsAppReady = true;
 });
 
-waClient.on('auth_failure', () => {
+waClient.on('auth_failure', (msg) => {
   isWhatsAppReady = false;
   currentQRCodeDataUrl = null;
-  console.error('❌ WhatsApp Auth Failure');
+  console.error('❌ WhatsApp Auth Failure:', msg);
 });
 
 waClient.on('disconnected', (reason) => {
@@ -147,15 +138,38 @@ waClient.initialize().catch(err => {
 // Helper: BD Phone Number to WhatsApp ID Formatter
 function formatToWhatsAppId(phone) {
   if (!phone) return null;
-  let cleaned = phone.toString().replace(/[^0-9]/g, '');
+  let cleaned = phone.toString().replace(/[^0-9]/g, '').trim();
   if (cleaned.startsWith('880')) {
-    // Already in 880 format
+    // already 880
   } else if (cleaned.startsWith('01')) {
     cleaned = '88' + cleaned;
   } else if (cleaned.startsWith('1')) {
     cleaned = '880' + cleaned;
   }
   return cleaned + '@c.us';
+}
+
+// সেফ মেসেজ সেন্ডার (getChat এরর হ্যান্ডলিং ও রিট্রাই সহ)
+async function safeSendMessage(waId, message, studentName) {
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      if (!isWhatsAppReady) {
+        console.warn(`⏳ Waiting for WhatsApp client to be fully ready (Attempt ${attempt}/3)...`);
+        await new Promise(r => setTimeout(r, 3000));
+      }
+      await waClient.sendMessage(waId, message);
+      console.log(`✅ Message successfully delivered to: ${studentName}`);
+      return true;
+    } catch (err) {
+      console.warn(`⚠️ Attempt ${attempt} failed for ${studentName}: ${err.message}`);
+      if (attempt < 3) {
+        await new Promise(r => setTimeout(r, 2500)); // ২.৫ সেকেন্ড অপেক্ষা করে পুনরায় চেষ্টা
+      } else {
+        console.error(`❌ Final Send Error to ${studentName}:`, err.message);
+        return false;
+      }
+    }
+  }
 }
 // ==============================================================
 
@@ -170,12 +184,9 @@ app.use(session({
   secret: process.env.SESSION_SECRET || 'uka_secure_attendance_session_secret_2026',
   resave: false,
   saveUninitialized: false,
-  cookie: { 
-    maxAge: 1000 * 60 * 60 * 24
-  }
+  cookie: { maxAge: 1000 * 60 * 60 * 24 }
 }));
 
-// Route Protection Middleware
 function isAuthenticated(req, res, next) {
   if (req.session && req.session.isAdmin) {
     return next();
@@ -217,7 +228,6 @@ app.get('/logout', (req, res) => {
 });
 // =========================================================
 
-// WhatsApp Status API for Frontend AJAX Polling
 app.get('/whatsapp/status', isAuthenticated, (req, res) => {
   res.json({
     connected: isWhatsAppReady,
@@ -225,7 +235,6 @@ app.get('/whatsapp/status', isAuthenticated, (req, res) => {
   });
 });
 
-// WhatsApp Logout Endpoint
 app.post('/whatsapp/logout', isAuthenticated, async (req, res) => {
   try {
     if (isWhatsAppReady) {
@@ -239,11 +248,9 @@ app.post('/whatsapp/logout', isAuthenticated, async (req, res) => {
   }
 });
 
-// WhatsApp Cache & Session Reset Endpoint
 app.post('/whatsapp/reset-cache', isAuthenticated, async (req, res) => {
   try {
     console.log('🔄 Clearing WhatsApp Cache & Session via Web Panel...');
-    
     try {
       await waClient.destroy();
     } catch (e) {
@@ -260,7 +267,6 @@ app.post('/whatsapp/reset-cache', isAuthenticated, async (req, res) => {
     if (fs.existsSync(cacheDir)) fs.rmSync(cacheDir, { recursive: true, force: true });
 
     waClient.initialize().catch(err => console.error('Re-init on reset error:', err));
-
     console.log('✅ WhatsApp Cache cleared and re-initialized!');
     res.redirect('/');
   } catch (err) {
@@ -278,13 +284,11 @@ app.get('/', isAuthenticated, async (req, res) => {
     const allBatches = await Batch.find().sort({ createdAt: -1 });
     const totalStudentsCount = await Student.countDocuments();
 
-    // Leaderboard Calculation
     const allStudents = await Student.find().populate('batch');
     const allAttendances = await Attendance.find();
 
     const leaderboard = allStudents.map(student => {
       if (!student.batch) return null;
-      
       const studentBatchId = student.batch._id.toString();
       const batchRecords = allAttendances.filter(a => a.batch.toString() === studentBatchId);
       const completedClassesCount = new Set(batchRecords.map(a => a.classNumber)).size;
@@ -464,14 +468,13 @@ app.get('/attendance/:batch_id/:class_number', isAuthenticated, async (req, res)
   }
 });
 
-// ১০. হাজিরা সংরক্ষণ ও সরাসরি ব্যাকগ্রাউন্ড মেসেজ প্রেরণ
+// ১০. হাজিরা সংরক্ষণ ও সেফ মেসেজ প্রেরণ
 app.post('/attendance/save', isAuthenticated, async (req, res) => {
   try {
     const { batch_id, class_number, class_date, attendance, send_whatsapp } = req.body;
     const batch = await Batch.findById(batch_id);
     const classNum = Number(class_number);
     
-    // টগল চেক: send_whatsapp অন অথবা ট্রু হলে মেসেজ ট্রিগার হবে
     const shouldSend = (send_whatsapp === 'on' || send_whatsapp === 'true');
 
     await Attendance.deleteMany({ batch: batch_id, classNumber: classNum });
@@ -488,10 +491,9 @@ app.post('/attendance/save', isAuthenticated, async (req, res) => {
       await Attendance.insertMany(recordsToInsert);
 
       if (shouldSend) {
-        // ব্যাকগ্রাউন্ড নন-ব্লকিং মেসেঞ্জার
         (async () => {
           try {
-            console.log(`\n🚀 Triggering WhatsApp alert process for Batch: ${batch.name}, Class: ${classNum}`);
+            console.log(`\n🚀 Starting WhatsApp message queue for Batch: ${batch.name}, Class: ${classNum}`);
             const studentIds = Object.keys(attendance);
             const students = await Student.find({ _id: { $in: studentIds } });
             const allPastRecords = await Attendance.find({ 
@@ -508,6 +510,7 @@ app.post('/attendance/save', isAuthenticated, async (req, res) => {
 
               const status = attendance[student._id.toString()];
               let msg = '';
+              const cleanName = (student.name || '').trim();
 
               if (status === 'Absent') {
                 let consecutiveAbsentCount = 1;
@@ -523,27 +526,22 @@ app.post('/attendance/save', isAuthenticated, async (req, res) => {
                 }
 
                 if (consecutiveAbsentCount >= 2) {
-                  msg = `আসসালামু আলাইকুম।\nসম্মানিত অভিভাবক, আপনার সন্তান *${student.name}* UKA Technical Institute-এর "${batch.name}" কোর্সে গত *${consecutiveAbsentCount} টি ক্লাসে ধারাবাহিকভাবে অনুপস্থিত* রয়েছে। অনুগ্রহ করে দ্রুত ইনস্টিটিউটে *ছুটির আবেদনপত্র (Leave Application)* জমা দিন, অন্যথায় প্রতিষ্ঠানের নিয়ম অনুযায়ী জরিমানা ধার্য করা হতে পারে। শিক্ষার্থীদের নিয়মিত উপস্থিতি ও অগ্রগতিতে আপনাদের আন্তরিক সহযোগিতা কাম্য।\n\n- UKA Technical Institute প্রশাসন`;
+                  msg = `আসসালামু আলাইকুম।\nসম্মানিত অভিভাবক, আপনার সন্তান *${cleanName}* UKA Technical Institute-এর "${batch.name}" কোর্সে গত *${consecutiveAbsentCount} টি ক্লাসে ধারাবাহিকভাবে অনুপস্থিত* রয়েছে। অনুগ্রহ করে দ্রুত ইনস্টিটিউটে *ছুটির আবেদনপত্র (Leave Application)* জমা দিন, অন্যথায় প্রতিষ্ঠানের নিয়ম অনুযায়ী জরিমানা ধার্য করা হতে পারে। শিক্ষার্থীদের নিয়মিত উপস্থিতি ও অগ্রগতিতে আপনাদের আন্তরিক সহযোগিতা কাম্য।\n\n- UKA Technical Institute প্রশাসন`;
                 } else {
-                  msg = `আসসালামু আলাইকুম।\nসম্মানিত অভিভাবক, আপনার সন্তান *${student.name}* অদ্য (${class_date}) তারিখে *UKA Technical Institute*-এর "${batch.name}"-এর ${classNum}-তম ক্লাসে অনুপস্থিত ছিল। আশা করি পরবর্তী ক্লাসে সে সময়মতো ক্লাসে উপস্থিত থাকবে। ধন্যবাদ।\n\n- UKA Technical Institute প্রশাসন`;
+                  msg = `আসসালামু আলাইকুম।\nসম্মানিত অভিভাবক, আপনার সন্তান *${cleanName}* অদ্য (${class_date}) তারিখে *UKA Technical Institute*-এর "${batch.name}"-এর ${classNum}-তম ক্লাসে অনুপস্থিত ছিল। আশা করি পরবর্তী ক্লাসে সে সময়মতো ক্লাসে উপস্থিত থাকবে। ধন্যবাদ।\n\n- UKA Technical Institute প্রশাসন`;
                 }
               } else if (status === 'Present') {
-                msg = `আসসালামু আলাইকুম।\nসম্মানিত অভিভাবক, আপনার সন্তান *${student.name}* অদ্য (${class_date}) তারিখে *UKA Technical Institute*-এর "${batch.name}"-এর ${classNum}-তম ক্লাসে উপস্থিত ছিল। ধন্যবাদ।\n\n- UKA Technical Institute প্রশাসন`;
+                msg = `আসসালামু আলাইকুম।\nসম্মানিত অভিভাবক, আপনার সন্তান *${cleanName}* অদ্য (${class_date}) তারিখে *UKA Technical Institute*-এর "${batch.name}"-এর ${classNum}-তম ক্লাসে উপস্থিত ছিল। ধন্যবাদ।\n\n- UKA Technical Institute প্রশাসন`;
               }
 
-              if (msg && waClient) {
-                console.log(`📨 Sending WhatsApp alert to ${student.name} (${waId})...`);
-                try {
-                  await waClient.sendMessage(waId, msg);
-                  console.log(`✅ Message successfully delivered to: ${student.name}`);
-                } catch (sendErr) {
-                  console.error(`❌ Send Error to ${student.name}:`, sendErr.message);
-                }
+              if (msg) {
+                console.log(`📨 Sending WhatsApp alert to ${cleanName} (${waId})...`);
+                await safeSendMessage(waId, msg, cleanName);
                 await new Promise(r => setTimeout(r, 1500));
               }
             }
           } catch (bgError) {
-            console.error('Background message execution error:', bgError);
+            console.error('Background message error:', bgError);
           }
         })();
       }
