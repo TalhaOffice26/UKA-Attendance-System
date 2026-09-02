@@ -136,11 +136,13 @@ waClient.initialize().catch(err => {
   console.error('Initial WhatsApp launch error:', err);
 });
 
-// Helper: BD Phone Number to WhatsApp ID Formatter
+// Helper: BD Phone Number to WhatsApp ID Formatter (নিখুঁত কনভার্টার)
 function formatToWhatsAppId(phone) {
   if (!phone) return null;
-  let cleaned = phone.replace(/[^0-9]/g, '');
-  if (cleaned.startsWith('01')) {
+  let cleaned = phone.toString().replace(/[^0-9]/g, '');
+  if (cleaned.startsWith('880')) {
+    // Already in 880 format
+  } else if (cleaned.startsWith('01')) {
     cleaned = '88' + cleaned;
   } else if (cleaned.startsWith('1')) {
     cleaned = '880' + cleaned;
@@ -454,14 +456,16 @@ app.get('/attendance/:batch_id/:class_number', isAuthenticated, async (req, res)
   }
 });
 
-// ১০. হাজিরা সংরক্ষণ ও ব্যাকগ্রাউন্ড মেসেজ প্রেরন (র‍্যাম ক্র্যাশ ও টাইমআউট মুক্ত)
+// ১০. হাজিরা সংরক্ষণ ও ডিরেক্ট ব্যাকগ্রাউন্ড মেসেজ প্রেরণ
 app.post('/attendance/save', isAuthenticated, async (req, res) => {
   try {
     const { batch_id, class_number, class_date, attendance, send_whatsapp } = req.body;
     const batch = await Batch.findById(batch_id);
     const classNum = Number(class_number);
-    const isAlertEnabled = (send_whatsapp === 'on' && isWhatsAppReady);
     
+    // টগল অন থাকলেই মেসেজ পাঠানো ট্রিগার হবে
+    const shouldSend = (send_whatsapp === 'on' || send_whatsapp === 'true');
+
     await Attendance.deleteMany({ batch: batch_id, classNumber: classNum });
 
     if (attendance && typeof attendance === 'object') {
@@ -471,14 +475,15 @@ app.post('/attendance/save', isAuthenticated, async (req, res) => {
         classNumber: classNum,
         date: class_date,
         status: attendance[studentId],
-        isAlertSent: isAlertEnabled
+        isAlertSent: shouldSend
       }));
       await Attendance.insertMany(recordsToInsert);
 
-      // ব্যাকগ্রাউন্ড কিউ
-      if (isAlertEnabled) {
+      if (shouldSend) {
+        // নন-ব্লকিং ব্যাকগ্রাউন্ড মেসেঞ্জার
         (async () => {
           try {
+            console.log(`\n🚀 Sending WhatsApp alerts for Batch: ${batch.name}, Class: ${classNum}`);
             const studentIds = Object.keys(attendance);
             const students = await Student.find({ _id: { $in: studentIds } });
             const allPastRecords = await Attendance.find({ 
@@ -488,7 +493,10 @@ app.post('/attendance/save', isAuthenticated, async (req, res) => {
 
             for (let student of students) {
               const waId = formatToWhatsAppId(student.phone);
-              if (!waId) continue;
+              if (!waId) {
+                console.warn(`⚠️ Invalid phone number for: ${student.name} (${student.phone})`);
+                continue;
+              }
 
               const status = attendance[student._id.toString()];
               let msg = '';
@@ -516,8 +524,14 @@ app.post('/attendance/save', isAuthenticated, async (req, res) => {
               }
 
               if (msg && waClient) {
-                await waClient.sendMessage(waId, msg).catch(e => console.error(`Error sending to ${student.name}:`, e.message));
-                await new Promise(r => setTimeout(r, 1200)); // প্রতি মেসেজে ১.২ সেকেন্ড গ্যাপ
+                console.log(`📨 Triggering alert to ${student.name} (${waId})...`);
+                try {
+                  await waClient.sendMessage(waId, msg);
+                  console.log(`✅ Message successfully sent to: ${student.name}`);
+                } catch (sendErr) {
+                  console.error(`❌ Send Error to ${student.name}:`, sendErr.message);
+                }
+                await new Promise(r => setTimeout(r, 1500));
               }
             }
           } catch (bgError) {
@@ -527,7 +541,7 @@ app.post('/attendance/save', isAuthenticated, async (req, res) => {
       }
     }
     
-    res.redirect(`/attendance/${batch_id}/${class_number}?msg_sent=${isAlertEnabled}`);
+    res.redirect(`/attendance/${batch_id}/${class_number}?msg_sent=${shouldSend}`);
   } catch (error) {
     res.status(500).send('Error saving attendance: ' + error.message);
   }
@@ -613,7 +627,7 @@ app.get('/report/full/:batch_id', isAuthenticated, async (req, res) => {
   }
 });
 
-// হেলথ চেক রাউট (UptimeRobot বা বাহ্যিক পিংয়ের জন্য)
+// হেলথ চেক রাউট
 app.get('/ping', (req, res) => {
   res.status(200).send('Pong! Server is awake.');
 });
