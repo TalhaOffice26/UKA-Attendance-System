@@ -78,34 +78,16 @@ const waClient = new Client({
       '--disable-extensions',
       '--disable-default-apps',
       '--mute-audio',
-      '--disable-web-security',
-      '--disable-features=IsolateOrigins,site-per-process',
       '--blink-settings=imagesEnabled=false',
-      '--js-flags=--max-old-space-size=128'
+      '--disable-background-networking',
+      '--disable-sync',
+      '--disable-translate',
+      '--hide-scrollbars',
+      '--metrics-recording-only',
+      '--no-default-browser-check',
+      '--safebrowsing-disable-auto-update',
+      '--js-flags=--max-old-space-size=160'
     ]
-  }
-});
-
-// ক্রোম পেজ লোড হওয়ার পর অপ্রয়োজনীয় মিডিয়া ও ফন্ট ব্লক করে র‍্যাম ৮০MB-তে রাখা
-waClient.on('ready', async () => {
-  isWhatsAppReady = true;
-  currentQRCodeDataUrl = null;
-  console.log('\n✅ WhatsApp Connected & Ready to send Attendance Alerts!\n');
-
-  try {
-    if (waClient.pupPage) {
-      await waClient.pupPage.setRequestInterception(true);
-      waClient.pupPage.on('request', (req) => {
-        const resourceType = req.resourceType();
-        if (['image', 'stylesheet', 'font', 'media'].includes(resourceType)) {
-          req.abort();
-        } else {
-          req.continue();
-        }
-      });
-    }
-  } catch (err) {
-    console.warn('Page interception setup notice:', err.message);
   }
 });
 
@@ -119,13 +101,23 @@ waClient.on('qr', async (qr) => {
   }
 });
 
+// স্ক্যান শেষ হওয়া মাত্রই QR মুছে যাবে এবং স্ট্যাটাস কানেক্টেড দেখাবে
 waClient.on('authenticated', () => {
   console.log('🔐 WhatsApp Authenticated successfully!');
   currentQRCodeDataUrl = null;
+  isWhatsAppReady = true;
+});
+
+waClient.on('ready', () => {
+  isWhatsAppReady = true;
+  currentQRCodeDataUrl = null;
+  console.log('\n✅ WhatsApp Connected & Ready to send Attendance Alerts!\n');
 });
 
 waClient.on('loading_screen', (percent, message) => {
   console.log(`⏳ WhatsApp Loading: ${percent}% - ${message}`);
+  currentQRCodeDataUrl = null;
+  isWhatsAppReady = true;
 });
 
 waClient.on('auth_failure', (msg) => {
@@ -145,12 +137,12 @@ waClient.initialize().catch(err => {
   console.error('Initial WhatsApp launch error:', err);
 });
 
-// Helper: BD Phone Number to WhatsApp ID Formatter
+// Helper: Phone Number Formatter
 function formatToWhatsAppId(phone) {
   if (!phone) return null;
   let cleaned = phone.toString().replace(/[^0-9]/g, '').trim();
   if (cleaned.startsWith('880')) {
-    // already in 880 format
+    // ok
   } else if (cleaned.startsWith('01')) {
     cleaned = '88' + cleaned;
   } else if (cleaned.startsWith('1')) {
@@ -163,10 +155,6 @@ function formatToWhatsAppId(phone) {
 async function safeSendMessage(waId, message, studentName) {
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
-      if (!isWhatsAppReady) {
-        console.warn(`⏳ Waiting for WhatsApp ready state (Attempt ${attempt}/3)...`);
-        await new Promise(r => setTimeout(r, 2500));
-      }
       await waClient.sendMessage(waId, message);
       console.log(`✅ Message successfully delivered to: ${studentName}`);
       return true;
@@ -238,6 +226,7 @@ app.get('/logout', (req, res) => {
 });
 // =========================================================
 
+// WhatsApp Status API for Frontend AJAX Polling
 app.get('/whatsapp/status', isAuthenticated, (req, res) => {
   res.json({
     connected: isWhatsAppReady,
@@ -245,6 +234,7 @@ app.get('/whatsapp/status', isAuthenticated, (req, res) => {
   });
 });
 
+// WhatsApp Logout Endpoint
 app.post('/whatsapp/logout', isAuthenticated, async (req, res) => {
   try {
     if (isWhatsAppReady) {
@@ -258,6 +248,7 @@ app.post('/whatsapp/logout', isAuthenticated, async (req, res) => {
   }
 });
 
+// WhatsApp Cache & Session Reset Endpoint
 app.post('/whatsapp/reset-cache', isAuthenticated, async (req, res) => {
   try {
     console.log('🔄 Clearing WhatsApp Cache & Session via Web Panel...');
