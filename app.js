@@ -60,11 +60,10 @@ const browserPath = getExecutablePath();
 console.log('Detected Browser Executable Path:', browserPath || 'Default Puppeteer Path');
 
 const waClient = new Client({
-  authStrategy: new LocalAuth({ clientId: "uka_session" }),
-  webVersionCache: {
-    type: 'remote',
-    remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-js/main/dist/wppconnect-wa.js',
-  },
+  authStrategy: new LocalAuth({ 
+    clientId: "uka_session",
+    dataPath: path.join(__dirname, '.wwebjs_auth')
+  }),
   puppeteer: {
     headless: true,
     ...(browserPath ? { executablePath: browserPath } : {}),
@@ -80,12 +79,12 @@ const waClient = new Client({
       '--disable-extensions',
       '--disable-default-apps',
       '--mute-audio',
-      '--js-flags=--max-old-space-size=256',
-      '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+      '--js-flags=--max-old-space-size=256'
     ]
   }
 });
 
+// কিউআর কোড পাওয়ার ইভেন্ট
 waClient.on('qr', async (qr) => {
   try {
     currentQRCodeDataUrl = await QRCode.toDataURL(qr, {
@@ -99,14 +98,25 @@ waClient.on('qr', async (qr) => {
   }
 });
 
+// অথেনটিকেশন সফল হওয়া মাত্রই কিউআর কোড রিমুভ ও স্টেট একটিভ
+waClient.on('authenticated', () => {
+  console.log('🔐 WhatsApp Authenticated successfully!');
+  currentQRCodeDataUrl = null;
+  isWhatsAppReady = true;
+});
+
+// হোয়াটসঅ্যাপ ড্যাশবোর্ড রেডি হওয়া
 waClient.on('ready', () => {
   isWhatsAppReady = true;
   currentQRCodeDataUrl = null;
   console.log('\n✅ WhatsApp Connected & Ready to send Attendance Alerts!\n');
 });
 
-waClient.on('authenticated', () => {
-  console.log('🔐 WhatsApp Authenticated!');
+// লোডিং স্ক্রিন
+waClient.on('loading_screen', (percent, message) => {
+  console.log(`⏳ WhatsApp Loading: ${percent}% - ${message}`);
+  currentQRCodeDataUrl = null;
+  isWhatsAppReady = true;
 });
 
 waClient.on('auth_failure', () => {
@@ -444,7 +454,7 @@ app.get('/attendance/:batch_id/:class_number', isAuthenticated, async (req, res)
   }
 });
 
-// ১০. হাজিরা সংরক্ষণ ও ব্যাকগ্রাউন্ড মেসেজ প্রেরণ (টাইমআউট ও ৫০২ মুক্ত)
+// ১০. হাজিরা সংরক্ষণ ও ব্যাকগ্রাউন্ড মেসেজ প্রেরন (র‍্যাম ক্র্যাশ ও টাইমআউট মুক্ত)
 app.post('/attendance/save', isAuthenticated, async (req, res) => {
   try {
     const { batch_id, class_number, class_date, attendance, send_whatsapp } = req.body;
@@ -465,7 +475,7 @@ app.post('/attendance/save', isAuthenticated, async (req, res) => {
       }));
       await Attendance.insertMany(recordsToInsert);
 
-      // ব্যাকগ্রাউন্ড কিউ: পেজ লোডিং যাতে আটকে না থাকে এবং মেমোরি স্পাইক না করে
+      // ব্যাকগ্রাউন্ড কিউ
       if (isAlertEnabled) {
         (async () => {
           try {
@@ -507,8 +517,7 @@ app.post('/attendance/save', isAuthenticated, async (req, res) => {
 
               if (msg && waClient) {
                 await waClient.sendMessage(waId, msg).catch(e => console.error(`Error sending to ${student.name}:`, e.message));
-                // প্রতিটি মেসেজের মাঝে ১.২ সেকেন্ড বিরতি
-                await new Promise(r => setTimeout(r, 1200));
+                await new Promise(r => setTimeout(r, 1200)); // প্রতি মেসেজে ১.২ সেকেন্ড গ্যাপ
               }
             }
           } catch (bgError) {
@@ -518,7 +527,6 @@ app.post('/attendance/save', isAuthenticated, async (req, res) => {
       }
     }
     
-    // সাথে সাথে ইউজারকে রিডাইরেক্ট করে দেওয়া হচ্ছে
     res.redirect(`/attendance/${batch_id}/${class_number}?msg_sent=${isAlertEnabled}`);
   } catch (error) {
     res.status(500).send('Error saving attendance: ' + error.message);
