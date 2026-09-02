@@ -29,7 +29,6 @@ function getExecutablePath() {
     return process.env.PUPPETEER_EXECUTABLE_PATH;
   }
 
-  // প্রজেক্টের লোকাল .cache ফোল্ডারে খোঁজা
   const localCachePath = path.join(__dirname, '.cache', 'puppeteer', 'chrome');
   if (fs.existsSync(localCachePath)) {
     try {
@@ -43,7 +42,6 @@ function getExecutablePath() {
     }
   }
 
-  // গ্লোবাল রেন্ডার ক্যাশ ও সিস্টেম পাথ
   const fallbackPaths = [
     '/opt/render/.cache/puppeteer/chrome/linux-146.0.7680.31/chrome-linux64/chrome',
     'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
@@ -80,6 +78,9 @@ const waClient = new Client({
       '--single-process',
       '--disable-gpu',
       '--disable-extensions',
+      '--disable-default-apps',
+      '--mute-audio',
+      '--js-flags=--max-old-space-size=256',
       '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
     ]
   }
@@ -150,7 +151,7 @@ app.use(session({
   resave: false,
   saveUninitialized: false,
   cookie: { 
-    maxAge: 1000 * 60 * 60 * 24 // ২৪ ঘণ্টা সক্রিয় থাকবে
+    maxAge: 1000 * 60 * 60 * 24
   }
 }));
 
@@ -443,7 +444,7 @@ app.get('/attendance/:batch_id/:class_number', isAuthenticated, async (req, res)
   }
 });
 
-// ১০. হাজিরা সংরক্ষণ ও মেসেজ প্রেরণ
+// ১০. হাজিরা সংরক্ষণ ও ব্যাকগ্রাউন্ড মেসেজ প্রেরণ (টাইমআউট ও ৫০২ মুক্ত)
 app.post('/attendance/save', isAuthenticated, async (req, res) => {
   try {
     const { batch_id, class_number, class_date, attendance, send_whatsapp } = req.body;
@@ -464,56 +465,60 @@ app.post('/attendance/save', isAuthenticated, async (req, res) => {
       }));
       await Attendance.insertMany(recordsToInsert);
 
+      // ব্যাকগ্রাউন্ড কিউ: পেজ লোডিং যাতে আটকে না থাকে এবং মেমোরি স্পাইক না করে
       if (isAlertEnabled) {
-        const studentIds = Object.keys(attendance);
-        const students = await Student.find({ _id: { $in: studentIds } });
+        (async () => {
+          try {
+            const studentIds = Object.keys(attendance);
+            const students = await Student.find({ _id: { $in: studentIds } });
+            const allPastRecords = await Attendance.find({ 
+              batch: batch_id,
+              classNumber: { $lt: classNum }
+            }).sort({ classNumber: -1 });
 
-        const allPastRecords = await Attendance.find({ 
-          batch: batch_id,
-          classNumber: { $lt: classNum }
-        }).sort({ classNumber: -1 });
+            for (let student of students) {
+              const waId = formatToWhatsAppId(student.phone);
+              if (!waId) continue;
 
-        for (let student of students) {
-          const waId = formatToWhatsAppId(student.phone);
-          if (!waId) continue;
+              const status = attendance[student._id.toString()];
+              let msg = '';
 
-          const status = attendance[student._id.toString()];
+              if (status === 'Absent') {
+                let consecutiveAbsentCount = 1;
+                for (let c = classNum - 1; c >= 1; c--) {
+                  const prevRec = allPastRecords.find(
+                    r => r.student.toString() === student._id.toString() && r.classNumber === c
+                  );
+                  if (prevRec && prevRec.status === 'Absent') {
+                    consecutiveAbsentCount++;
+                  } else {
+                    break;
+                  }
+                }
 
-          if (status === 'Absent') {
-            let consecutiveAbsentCount = 1;
+                if (consecutiveAbsentCount >= 2) {
+                  msg = `আসসালামু আলাইকুম।\nসম্মানিত অভিভাবক, আপনার সন্তান *${student.name}* UKA Technical Institute-এর "${batch.name}" কোর্সে গত *${consecutiveAbsentCount} টি ক্লাসে ধারাবাহিকভাবে অনুপস্থিত* রয়েছে। অনুগ্রহ করে দ্রুত ইনস্টিটিউটে *ছুটির আবেদনপত্র (Leave Application)* জমা দিন, অন্যথায় প্রতিষ্ঠানের নিয়ম অনুযায়ী জরিমানা ধার্য করা হতে পারে। শিক্ষার্থীদের নিয়মিত উপস্থিতি ও অগ্রগতিতে আপনাদের আন্তরিক সহযোগিতা কাম্য।\n\n- UKA Technical Institute প্রশাসন`;
+                } else {
+                  msg = `আসসালামু আলাইকুম।\nসম্মানিত অভিভাবক, আপনার সন্তান *${student.name}* অদ্য (${class_date}) তারিখে *UKA Technical Institute*-এর "${batch.name}"-এর ${classNum}-তম ক্লাসে অনুপস্থিত ছিল। আশা করি পরবর্তী ক্লাসে সে সময়মতো ক্লাসে উপস্থিত থাকবে। ধন্যবাদ।\n\n- UKA Technical Institute প্রশাসন`;
+                }
+              } else if (status === 'Present') {
+                msg = `আসসালামু আলাইকুম।\nসম্মানিত অভিভাবক, আপনার সন্তান *${student.name}* অদ্য (${class_date}) তারিখে *UKA Technical Institute*-এর "${batch.name}"-এর ${classNum}-তম ক্লাসে উপস্থিত ছিল। ধন্যবাদ।\n\n- UKA Technical Institute প্রশাসন`;
+              }
 
-            for (let c = classNum - 1; c >= 1; c--) {
-              const prevRec = allPastRecords.find(
-                r => r.student.toString() === student._id.toString() && r.classNumber === c
-              );
-              if (prevRec && prevRec.status === 'Absent') {
-                consecutiveAbsentCount++;
-              } else {
-                break;
+              if (msg && waClient) {
+                await waClient.sendMessage(waId, msg).catch(e => console.error(`Error sending to ${student.name}:`, e.message));
+                // প্রতিটি মেসেজের মাঝে ১.২ সেকেন্ড বিরতি
+                await new Promise(r => setTimeout(r, 1200));
               }
             }
-
-            let msg = '';
-            if (consecutiveAbsentCount >= 2) {
-              msg = `আসসালামু আলাইকুম।\nসম্মানিত অভিভাবক, আপনার সন্তান *${student.name}* UKA Technical Institute-এর "${batch.name}" কোর্সে গত *${consecutiveAbsentCount} টি ক্লাসে ধারাবাহিকভাবে অনুপস্থিত* রয়েছে। অনুগ্রহ করে দ্রুত ইনস্টিটিউটে *ছুটির আবেদনপত্র (Leave Application)* জমা দিন, অন্যথায় প্রতিষ্ঠানের নিয়ম অনুযায়ী জরিমানা ধার্য করা হতে পারে। শিক্ষার্থীদের নিয়মিত উপস্থিতি ও অগ্রগতিতে আপনাদের আন্তরিক সহযোগিতা কাম্য।\n\n- UKA Technical Institute প্রশাসন`;
-            } else {
-              msg = `আসসালামু আলাইকুম।\nসম্মানিত অভিভাবক, আপনার সন্তান *${student.name}* অদ্য (${class_date}) তারিখে *UKA Technical Institute*-এর "${batch.name}"-এর ${classNum}-তম ক্লাসে অনুপস্থিত ছিল। আশা করি পরবর্তী ক্লাসে সে সময়মতো ক্লাসে উপস্থিত থাকবে। ধন্যবাদ।\n\n- UKA Technical Institute প্রশাসন`;
-            }
-
-            waClient.sendMessage(waId, msg)
-              .then(() => console.log(`📤 Absent alert (${consecutiveAbsentCount} days) sent to ${student.name}`))
-              .catch(err => console.error(`❌ Error to ${student.name}:`, err.message));
-
-          } else if (status === 'Present') {
-            const msg = `আসসালামু আলাইকুম।\nসম্মানিত অভিভাবক, আপনার সন্তান *${student.name}* অদ্য (${class_date}) তারিখে *UKA Technical Institute*-এর "${batch.name}"-এর ${classNum}-তম ক্লাসে উপস্থিত ছিল। ধন্যবাদ।\n\n- UKA Technical Institute প্রশাসন`;
-
-            waClient.sendMessage(waId, msg)
-              .then(() => console.log(`📤 Present alert sent to ${student.name}`))
-              .catch(err => console.error(`❌ Error to ${student.name}:`, err.message));
+          } catch (bgError) {
+            console.error('Background message error:', bgError);
           }
-        }
+        })();
       }
     }
+    
+    // সাথে সাথে ইউজারকে রিডাইরেক্ট করে দেওয়া হচ্ছে
     res.redirect(`/attendance/${batch_id}/${class_number}?msg_sent=${isAlertEnabled}`);
   } catch (error) {
     res.status(500).send('Error saving attendance: ' + error.message);
@@ -605,7 +610,7 @@ app.get('/ping', (req, res) => {
   res.status(200).send('Pong! Server is awake.');
 });
 
-// সেল্ফ-পিং সার্ভিস: প্রতি ১০ মিনিটে একবার নিজেকে পিং করবে
+// সেল্ফ-পিং সার্ভিস
 const SERVER_URL = process.env.RENDER_EXTERNAL_URL;
 if (SERVER_URL) {
   setInterval(() => {
