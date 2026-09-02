@@ -23,20 +23,42 @@ mongoose.connect(mongoURI)
 let isWhatsAppReady = false;
 let currentQRCodeDataUrl = null;
 
-const possiblePaths = [
-  process.env.PUPPETEER_EXECUTABLE_PATH,
-  '/opt/render/.cache/puppeteer/chrome/linux-146.0.7680.31/chrome-linux64/chrome',
-  'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-  'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
-  'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
-  'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
-  '/usr/bin/google-chrome',
-  '/usr/bin/chromium-browser',
-  '/usr/bin/chromium'
-];
+// প্রজেক্ট ক্যাশ ও লিনাক্স ডিরেক্টরি থেকে ক্রোম পাথ খোঁজা
+function getExecutablePath() {
+  if (process.env.PUPPETEER_EXECUTABLE_PATH && fs.existsSync(process.env.PUPPETEER_EXECUTABLE_PATH)) {
+    return process.env.PUPPETEER_EXECUTABLE_PATH;
+  }
 
-let browserPath = possiblePaths.find(p => p && fs.existsSync(p));
+  // প্রজেক্টের লোকাল .cache ফোল্ডারে খোঁজা
+  const localCachePath = path.join(__dirname, '.cache', 'puppeteer', 'chrome');
+  if (fs.existsSync(localCachePath)) {
+    try {
+      const versions = fs.readdirSync(localCachePath);
+      for (const ver of versions) {
+        const candidate = path.join(localCachePath, ver, 'chrome-linux64', 'chrome');
+        if (fs.existsSync(candidate)) return candidate;
+      }
+    } catch (e) {
+      console.warn('Error reading local puppeteer cache:', e.message);
+    }
+  }
 
+  // গ্লোবাল রেন্ডার ক্যাশ ও সিস্টেম পাথ
+  const fallbackPaths = [
+    '/opt/render/.cache/puppeteer/chrome/linux-146.0.7680.31/chrome-linux64/chrome',
+    'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+    'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+    'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
+    '/usr/bin/google-chrome',
+    '/usr/bin/chromium-browser',
+    '/usr/bin/chromium'
+  ];
+
+  return fallbackPaths.find(p => p && fs.existsSync(p)) || null;
+}
+
+const browserPath = getExecutablePath();
 console.log('Detected Browser Executable Path:', browserPath || 'Default Puppeteer Path');
 
 const waClient = new Client({
