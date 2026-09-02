@@ -24,6 +24,8 @@ let isWhatsAppReady = false;
 let currentQRCodeDataUrl = null;
 
 const possiblePaths = [
+  process.env.PUPPETEER_EXECUTABLE_PATH,
+  '/opt/render/.cache/puppeteer/chrome/linux-146.0.7680.31/chrome-linux64/chrome',
   'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
   'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
   'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
@@ -33,7 +35,9 @@ const possiblePaths = [
   '/usr/bin/chromium'
 ];
 
-let browserPath = possiblePaths.find(p => fs.existsSync(p));
+let browserPath = possiblePaths.find(p => p && fs.existsSync(p));
+
+console.log('Detected Browser Executable Path:', browserPath || 'Default Puppeteer Path');
 
 const waClient = new Client({
   authStrategy: new LocalAuth({ clientId: "uka_session" }),
@@ -48,9 +52,11 @@ const waClient = new Client({
       '--no-sandbox',
       '--disable-setuid-sandbox',
       '--disable-dev-shm-usage',
-      '--disable-gpu',
+      '--disable-accelerated-2d-canvas',
       '--no-first-run',
       '--no-zygote',
+      '--single-process',
+      '--disable-gpu',
       '--disable-extensions',
       '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
     ]
@@ -122,7 +128,7 @@ app.use(session({
   resave: false,
   saveUninitialized: false,
   cookie: { 
-    maxAge: 1000 * 60 * 60 * 24 // ২৪ ঘণ্টা সক্রিয় থাকবে
+    maxAge: 1000 * 60 * 60 * 24 // ২৪ ঘণ্টা সক্রিয় থাকবে
   }
 }));
 
@@ -149,15 +155,16 @@ app.get('/login', (req, res) => {
 });
 
 app.post('/login', (req, res) => {
-  const { username, password } = req.body;
-  const adminUser = process.env.ADMIN_USER || 'admin';
-  const adminPass = process.env.ADMIN_PASSWORD || 'uka@admin2026';
+  const username = (req.body.username || '').trim();
+  const password = (req.body.password || '').trim();
+  const adminUser = (process.env.ADMIN_USER || 'admin').trim();
+  const adminPass = (process.env.ADMIN_PASSWORD || 'ukatech@#').trim();
 
   if (username === adminUser && password === adminPass) {
     req.session.isAdmin = true;
     return res.redirect('/');
   }
-  res.render('login', { error: 'ভুল ইউজারনেম অথবা পাসওয়ার্ড!' });
+  res.render('login', { error: 'ভুল ইউজারনেম অথবা পাসওয়ার্ড!' });
 });
 
 app.get('/logout', (req, res) => {
@@ -259,7 +266,7 @@ app.get('/', isAuthenticated, async (req, res) => {
 
     res.render('dashboard', { 
       batches, 
-      allBatches,
+      allBatches, 
       categories: CATEGORIES, 
       selectedCategory,
       totalStudentsCount,
@@ -414,7 +421,7 @@ app.get('/attendance/:batch_id/:class_number', isAuthenticated, async (req, res)
   }
 });
 
-// ১০. হাজিরা সংরক্ষণ ও মেসেজ প্রেরণ (ডায়নামিক অনুপস্থিতির দিন ও মার্জিত মেসেজ ফরম্যাট সহ)
+// ১০. হাজিরা সংরক্ষণ ও মেসেজ প্রেরণ
 app.post('/attendance/save', isAuthenticated, async (req, res) => {
   try {
     const { batch_id, class_number, class_date, attendance, send_whatsapp } = req.body;
@@ -439,7 +446,6 @@ app.post('/attendance/save', isAuthenticated, async (req, res) => {
         const studentIds = Object.keys(attendance);
         const students = await Student.find({ _id: { $in: studentIds } });
 
-        // এই ব্যাচের বর্তমান ক্লাস পর্যন্ত হওয়া সব রেকর্ড লোড করা
         const allPastRecords = await Attendance.find({ 
           batch: batch_id,
           classNumber: { $lt: classNum }
@@ -452,7 +458,6 @@ app.post('/attendance/save', isAuthenticated, async (req, res) => {
           const status = attendance[student._id.toString()];
 
           if (status === 'Absent') {
-            // ডায়নামিকভাবে টানা কতটি ক্লাসে Absent তা বের করা
             let consecutiveAbsentCount = 1;
 
             for (let c = classNum - 1; c >= 1; c--) {
@@ -572,19 +577,21 @@ app.get('/report/full/:batch_id', isAuthenticated, async (req, res) => {
     res.status(500).send('Error generating full report: ' + error.message);
   }
 });
-// হেলথ চেক রাউট (UptimeRobot বা বাহ্যিক পিংয়ের জন্য)
+
+// হেলথ চেক রাউট (UptimeRobot বা বাহ্যিক পিংয়ের জন্য)
 app.get('/ping', (req, res) => {
   res.status(200).send('Pong! Server is awake.');
 });
 
 // সেল্ফ-পিং সার্ভিস: প্রতি ১০ মিনিটে একবার নিজেকে পিং করবে
-const SERVER_URL = process.env.RENDER_EXTERNAL_URL; // Render স্বয়ংক্রিয়ভাবে এটি সেট করে
+const SERVER_URL = process.env.RENDER_EXTERNAL_URL;
 if (SERVER_URL) {
   setInterval(() => {
     fetch(`${SERVER_URL}/ping`)
       .then(() => console.log('⏰ Keep-Alive self-ping sent successfully'))
       .catch(err => console.error('Keep-Alive ping error:', err.message));
-  }, 10 * 60 * 1000); // প্রতি ১০ মিনিটে
+  }, 10 * 60 * 1000);
 }
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Server running at http://localhost:${PORT}`));
