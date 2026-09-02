@@ -79,7 +79,15 @@ const waClient = new Client({
       '--disable-extensions',
       '--disable-default-apps',
       '--mute-audio',
-      '--js-flags=--max-old-space-size=256'
+      '--blink-settings=imagesEnabled=false',
+      '--disable-background-networking',
+      '--disable-sync',
+      '--disable-translate',
+      '--hide-scrollbars',
+      '--metrics-recording-only',
+      '--no-default-browser-check',
+      '--safebrowsing-disable-auto-update',
+      '--js-flags=--max-old-space-size=160'
     ]
   }
 });
@@ -136,7 +144,7 @@ waClient.initialize().catch(err => {
   console.error('Initial WhatsApp launch error:', err);
 });
 
-// Helper: BD Phone Number to WhatsApp ID Formatter (নিখুঁত কনভার্টার)
+// Helper: BD Phone Number to WhatsApp ID Formatter
 function formatToWhatsAppId(phone) {
   if (!phone) return null;
   let cleaned = phone.toString().replace(/[^0-9]/g, '');
@@ -456,14 +464,14 @@ app.get('/attendance/:batch_id/:class_number', isAuthenticated, async (req, res)
   }
 });
 
-// ১০. হাজিরা সংরক্ষণ ও ডিরেক্ট ব্যাকগ্রাউন্ড মেসেজ প্রেরণ
+// ১০. হাজিরা সংরক্ষণ ও সরাসরি ব্যাকগ্রাউন্ড মেসেজ প্রেরণ
 app.post('/attendance/save', isAuthenticated, async (req, res) => {
   try {
     const { batch_id, class_number, class_date, attendance, send_whatsapp } = req.body;
     const batch = await Batch.findById(batch_id);
     const classNum = Number(class_number);
     
-    // টগল অন থাকলেই মেসেজ পাঠানো ট্রিগার হবে
+    // টগল চেক: send_whatsapp অন অথবা ট্রু হলে মেসেজ ট্রিগার হবে
     const shouldSend = (send_whatsapp === 'on' || send_whatsapp === 'true');
 
     await Attendance.deleteMany({ batch: batch_id, classNumber: classNum });
@@ -480,10 +488,10 @@ app.post('/attendance/save', isAuthenticated, async (req, res) => {
       await Attendance.insertMany(recordsToInsert);
 
       if (shouldSend) {
-        // নন-ব্লকিং ব্যাকগ্রাউন্ড মেসেঞ্জার
+        // ব্যাকগ্রাউন্ড নন-ব্লকিং মেসেঞ্জার
         (async () => {
           try {
-            console.log(`\n🚀 Sending WhatsApp alerts for Batch: ${batch.name}, Class: ${classNum}`);
+            console.log(`\n🚀 Triggering WhatsApp alert process for Batch: ${batch.name}, Class: ${classNum}`);
             const studentIds = Object.keys(attendance);
             const students = await Student.find({ _id: { $in: studentIds } });
             const allPastRecords = await Attendance.find({ 
@@ -524,10 +532,10 @@ app.post('/attendance/save', isAuthenticated, async (req, res) => {
               }
 
               if (msg && waClient) {
-                console.log(`📨 Triggering alert to ${student.name} (${waId})...`);
+                console.log(`📨 Sending WhatsApp alert to ${student.name} (${waId})...`);
                 try {
                   await waClient.sendMessage(waId, msg);
-                  console.log(`✅ Message successfully sent to: ${student.name}`);
+                  console.log(`✅ Message successfully delivered to: ${student.name}`);
                 } catch (sendErr) {
                   console.error(`❌ Send Error to ${student.name}:`, sendErr.message);
                 }
@@ -535,7 +543,7 @@ app.post('/attendance/save', isAuthenticated, async (req, res) => {
               }
             }
           } catch (bgError) {
-            console.error('Background message error:', bgError);
+            console.error('Background message execution error:', bgError);
           }
         })();
       }
