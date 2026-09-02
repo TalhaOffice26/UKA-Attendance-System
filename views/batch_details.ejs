@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title><%= batch.name %> - Attendance & Classes | UKA</title>
+  
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Hind+Siliguri:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+  <style>
+    :root {
+      --bg-color: #f1f5f9;
+      --card-border: #e2e8f0;
+      --primary-color: #2563eb;
+    }
+
+    body {
+      font-family: 'Plus Jakarta Sans', 'Hind Siliguri', sans-serif;
+      background-color: var(--bg-color);
+      color: #0f172a;
+    }
+
+    .batch-header-card {
+      background: #ffffff;
+      border-radius: 20px;
+      padding: 24px 28px;
+      border: 1px solid var(--card-border);
+      box-shadow: 0 10px 25px rgba(0,0,0,0.03);
+    }
+
+    /* Class Button Styles */
+    .class-card-btn {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 18px 10px;
+      background: #ffffff;
+      border: 2px solid #e2e8f0;
+      border-radius: 16px;
+      text-decoration: none;
+      color: #1e293b;
+      transition: all 0.25s ease;
+      position: relative;
+    }
+
+    .class-card-btn:hover {
+      transform: translateY(-4px);
+      border-color: var(--primary-color);
+      box-shadow: 0 12px 24px rgba(37, 99, 235, 0.15);
+      color: var(--primary-color);
+    }
+
+    .class-card-btn .lecture-tag {
+      font-size: 0.7rem;
+      font-weight: 700;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      color: #94a3b8;
+    }
+
+    .class-card-btn .class-num {
+      font-size: 1.15rem;
+      font-weight: 800;
+      color: #1e293b;
+    }
+
+    .class-card-btn.is-completed {
+      background: #f0fdf4 !important;
+      border-color: #86efac !important;
+      color: #15803d !important;
+    }
+
+    .class-card-btn.is-completed .class-num { color: #15803d !important; }
+    .class-card-btn.is-completed .lecture-tag { color: #16a34a !important; }
+
+    .completed-badge {
+      font-size: 0.65rem;
+      font-weight: 700;
+      background: #22c55e;
+      color: white;
+      padding: 2px 8px;
+      border-radius: 20px;
+      margin-top: 6px;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .date-tag {
+      font-size: 0.68rem;
+      color: #64748b;
+      margin-top: 3px;
+      font-weight: 600;
+    }
+
+    /* Sidebar Offcanvas Styles */
+    .offcanvas {
+      border-top-left-radius: 20px;
+      border-bottom-left-radius: 20px;
+    }
+    .sidebar-menu-btn {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 14px 16px;
+      border-radius: 12px;
+      color: #1e293b;
+      font-weight: 600;
+      text-decoration: none;
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      transition: all 0.2s ease;
+      width: 100%;
+      text-align: left;
+    }
+    .sidebar-menu-btn:hover {
+      background: #e2e8f0;
+      color: var(--primary-color);
+    }
+    .sidebar-menu-btn.btn-danger-soft {
+      background: #fef2f2;
+      border-color: #fee2e2;
+      color: #dc2626;
+    }
+    .sidebar-menu-btn.btn-danger-soft:hover {
+      background: #dc2626;
+      color: #ffffff;
+    }
+
+    .avatar-circle {
+      width: 38px;
+      height: 38px;
+      background: #e0e7ff;
+      color: #4338ca;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 50%;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="container py-3 py-md-4">
+
+    <!-- Top Clean Mobile & Desktop Bar -->
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <a href="/" class="btn btn-white bg-white border rounded-pill px-3 py-2 fw-semibold btn-sm shadow-sm text-secondary">
+        <i class="fa-solid fa-arrow-left me-1"></i> ড্যাশবোর্ড
+      </a>
+      
+      <!-- Right Sidebar Trigger Button -->
+      <button class="btn btn-primary rounded-pill px-3 py-2 fw-bold shadow-sm d-flex align-items-center gap-2" type="button" data-bs-toggle="offcanvas" data-bs-target="#batchMenuSidebar">
+        <i class="fa-solid fa-bars-staggered"></i>
+        <span>মেনু ও সেটিংস</span>
+      </button>
+    </div>
+
+    <!-- Batch Header Info -->
+    <div class="batch-header-card mb-4">
+      <div class="d-flex flex-wrap justify-content-between align-items-center gap-3">
+        <div>
+          <div class="d-flex align-items-center gap-2 mb-2">
+            <span class="badge bg-primary-subtle text-primary border border-primary-subtle rounded-pill px-3 py-1 fw-bold">
+              <%= batch.category %>
+            </span>
+            <span class="badge bg-dark-subtle text-dark-emphasis border border-secondary-subtle rounded-pill px-3 py-1 fw-bold">
+              Total <%= batch.totalClasses %> Classes
+            </span>
+          </div>
+          <h3 class="fw-extrabold text-dark mb-2"><%= batch.name %></h3>
+          
+          <div class="text-muted small">
+            <span class="badge bg-light text-dark border p-2 rounded-3 me-2">
+              <i class="fa-solid fa-chalkboard-user text-primary me-1"></i> <strong>Instructor:</strong> <%= batch.teacherName || 'Not Assigned' %>
+            </span>
+            <% if(batch.teacherPhone) { %>
+              <span class="badge bg-light text-dark border p-2 rounded-3">
+                <i class="fa-solid fa-phone text-success me-1"></i> <%= batch.teacherPhone %>
+              </span>
+            <% } %>
+          </div>
+        </div>
+
+        <div class="d-flex gap-2 text-center w-100 w-md-auto mt-2 mt-md-0">
+          <div class="bg-light p-3 rounded-4 border flex-fill px-4">
+            <div class="fs-4 fw-extrabold text-primary"><%= students.length %></div>
+            <div class="text-muted small fw-semibold">শিক্ষার্থী সংখ্যা</div>
+          </div>
+          <div class="bg-light p-3 rounded-4 border flex-fill px-4">
+            <div class="fs-4 fw-extrabold text-success">
+              <%= Object.keys(completedClassesMap).length %> / <%= batch.totalClasses %>
+            </div>
+            <div class="text-muted small fw-semibold">সম্পন্ন ক্লাস</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Attendance Grid -->
+    <div class="card border-0 shadow-sm rounded-4 p-3 p-md-4">
+      <div class="d-flex flex-wrap justify-content-between align-items-center mb-4 pb-2 border-bottom gap-2">
+        <div>
+          <h4 class="fw-bold mb-1"><i class="fa-solid fa-calendar-check text-primary me-2"></i>Daily Attendance Grid</h4>
+          <p class="text-muted small mb-0">হাজিরা দেওয়ার জন্য ক্লাসের বাটনে ক্লিক করুন</p>
+        </div>
+        <div class="d-flex gap-3 small fw-semibold">
+          <span><i class="fa-solid fa-circle text-success me-1"></i> Completed</span>
+          <span><i class="fa-solid fa-circle text-secondary me-1"></i> Pending</span>
+        </div>
+      </div>
+
+      <!-- Grid Cards -->
+      <div class="row row-cols-2 row-cols-sm-3 row-cols-md-4 row-cols-lg-5 g-3">
+        <% for(let i = 1; i <= batch.totalClasses; i++) { 
+            const isCompleted = completedClassesMap[i] !== undefined;
+            const classDate = completedClassesMap[i];
+        %>
+          <div class="col">
+            <a href="/attendance/<%= batch._id %>/<%= i %>" class="class-card-btn shadow-sm <%= isCompleted ? 'is-completed' : '' %>">
+              <span class="lecture-tag">LECTURE</span>
+              <span class="class-num">Class <%= i %></span>
+              
+              <% if(isCompleted) { %>
+                <span class="completed-badge">
+                  <i class="fa-solid fa-check"></i> Completed
+                </span>
+                <span class="date-tag"><%= classDate %></span>
+              <% } else { %>
+                <i class="fa-solid fa-clipboard-user mt-2 text-secondary opacity-50"></i>
+                <span class="text-muted" style="font-size: 0.65rem; margin-top: 4px;">Pending</span>
+              <% } %>
+            </a>
+          </div>
+        <% } %>
+      </div>
+    </div>
+  </div>
+
+  <!-- Offcanvas Sidebar Menu -->
+  <div class="offcanvas offcanvas-end border-0 shadow-lg" tabindex="-1" id="batchMenuSidebar">
+    <div class="offcanvas-header bg-dark text-white p-3">
+      <div>
+        <h6 class="offcanvas-title fw-bold mb-0">কোর্স সেটিংস ও মেনু</h6>
+        <small class="text-white-50"><%= batch.name %></small>
+      </div>
+      <button type="button" class="btn-close btn-close-white" data-bs-dismiss="offcanvas"></button>
+    </div>
+    
+    <div class="offcanvas-body p-3 d-flex flex-column justify-content-between">
+      
+      <!-- Top Action Links -->
+      <div class="d-flex flex-column gap-2">
+        <label class="text-muted small fw-bold text-uppercase px-1">ম্যানেজমেন্ট অপশন</label>
+        
+        <!-- Students List Trigger -->
+        <button type="button" class="sidebar-menu-btn" data-bs-toggle="modal" data-bs-target="#studentManageModal" data-bs-dismiss="offcanvas">
+          <i class="fa-solid fa-users text-primary fs-5"></i>
+          <div>
+            <div class="lh-1">শিক্ষার্থী তালিকা ও ভর্তি</div>
+            <small class="text-muted fw-normal">মোট <%= students.length %> জন শিক্ষার্থী</small>
+          </div>
+        </button>
+
+        <!-- Full Course Report -->
+        <a href="/report/full/<%= batch._id %>" target="_blank" class="sidebar-menu-btn">
+          <i class="fa-solid fa-file-invoice text-success fs-5"></i>
+          <div>
+            <div class="lh-1">ফুল কোর্স রিপোর্ট</div>
+            <small class="text-muted fw-normal">উপস্থিতি সামারি ও PDF প্রিন্ট</small>
+          </div>
+        </a>
+
+        <!-- Edit Batch -->
+        <button type="button" class="sidebar-menu-btn" data-bs-toggle="modal" data-bs-target="#editBatchModal" data-bs-dismiss="offcanvas">
+          <i class="fa-solid fa-pen-to-square text-warning fs-5"></i>
+          <div>
+            <div class="lh-1">ব্যাচ ও শিক্ষক পরিবর্তন</div>
+            <small class="text-muted fw-normal">নাম, ক্লাস ও শিক্ষক এডিট</small>
+          </div>
+        </button>
+      </div>
+
+      <!-- Bottom Settings & Danger Zone -->
+      <div class="mt-4 pt-3 border-top">
+        <label class="text-danger small fw-bold text-uppercase px-1 mb-2">সেটিংস ও ডেন্জার জোন</label>
+        <form action="/batch/delete/<%= batch._id %>" method="POST" onsubmit="return confirm('⚠️ সতর্কতা: আপনি কি নিশ্চিতভাবে «<%= batch.name %>» ব্যাচটি মুছে ফেলতে চান?\n\nএটি ডিলিট করলে সকল শিক্ষার্থী এবং হাজিরার তথ্য স্থায়ীভাবে ডিলিট হয়ে যাবে!');">
+          <button type="submit" class="sidebar-menu-btn btn-danger-soft">
+            <i class="fa-solid fa-trash-can fs-5"></i>
+            <div>
+              <div class="lh-1">ব্যাচ ডিলিট করুন</div>
+              <small class="opacity-75 fw-normal">স্থায়ীভাবে সব ডাটা মুছুন</small>
+            </div>
+          </button>
+        </form>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Student Management Modal -->
+  <div class="modal fade" id="studentManageModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+      <div class="modal-content border-0 shadow-lg rounded-4 overflow-hidden">
+        
+        <div class="modal-header bg-dark text-white p-4">
+          <div>
+            <h5 class="modal-title fw-bold mb-0"><i class="fa-solid fa-user-group text-warning me-2"></i>শিক্ষার্থী তালিকা ও ব্যবস্থাপনা</h5>
+            <small class="text-white-50"><%= batch.name %></small>
+          </div>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+        </div>
+
+        <div class="modal-body p-3 p-md-4 bg-light">
+          <!-- Add Student Form -->
+          <div class="card border-0 shadow-sm rounded-3 mb-4">
+            <div class="card-body p-3">
+              <h6 class="fw-bold text-primary mb-3"><i class="fa-solid fa-user-plus me-1"></i> নতুন শিক্ষার্থী যুক্ত করুন</h6>
+              <form action="/student/add" method="POST" class="row g-2">
+                <input type="hidden" name="batch_id" value="<%= batch._id %>">
+                <div class="col-md-6">
+                  <input type="text" name="name" class="form-control" placeholder="শিক্ষার্থীর নাম" required>
+                </div>
+                <div class="col-md-4">
+                  <input type="text" name="phone" class="form-control" placeholder="মোবাইল নম্বর" required>
+                </div>
+                <div class="col-md-2">
+                  <button type="submit" class="btn btn-success fw-bold w-100">+ Add</button>
+                </div>
+              </form>
+            </div>
+          </div>
+
+          <!-- Existing Students List with Quick Edit -->
+          <h6 class="fw-bold text-dark mb-3">মোট শিক্ষার্থী: <%= students.length %> জন</h6>
+          <div style="max-height: 360px; overflow-y: auto;" class="pe-1">
+            <% if (students.length === 0) { %>
+              <div class="text-center py-4 text-muted bg-white rounded-3 border">
+                এখনো কোনো স্টুডেন্ট যোগ করা হয়নি।
+              </div>
+            <% } %>
+
+            <% students.forEach((s, idx) => { %>
+              <div class="p-2 mb-2 bg-white rounded-3 border d-flex justify-content-between align-items-center">
+                <div class="d-flex align-items-center gap-2">
+                  <div class="avatar-circle"><%= idx + 1 %></div>
+                  <div>
+                    <h6 class="fw-bold mb-0 text-dark"><%= s.name %></h6>
+                    <small class="text-muted"><i class="fa-solid fa-phone me-1 text-primary"></i><%= s.phone %></small>
+                  </div>
+                </div>
+                <div class="d-flex gap-1">
+                  <button type="button" class="btn btn-outline-primary btn-sm rounded-pill px-2 py-1" onclick="openStudentEditModal('<%= s._id %>', '<%= s.name %>', '<%= s.phone %>')">
+                    <i class="fa-solid fa-pen-to-square"></i>
+                  </button>
+                  <form action="/student/delete/<%= s._id %>" method="POST" onsubmit="return confirm('মুছে ফেলতে চান?');">
+                    <input type="hidden" name="batch_id" value="<%= batch._id %>">
+                    <button type="submit" class="btn btn-outline-danger btn-sm rounded-pill px-2 py-1">
+                      <i class="fa-solid fa-trash-can"></i>
+                    </button>
+                  </form>
+                </div>
+              </div>
+            <% }) %>
+          </div>
+        </div>
+
+        <div class="modal-footer bg-white border-0 p-3">
+          <button type="button" class="btn btn-secondary rounded-3 px-4" data-bs-dismiss="modal">Close</button>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- Edit Batch & Teacher Modal -->
+  <div class="modal fade" id="editBatchModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content border-0 shadow-lg rounded-4 overflow-hidden">
+        <form action="/batch/edit/<%= batch._id %>" method="POST">
+          <div class="modal-header bg-dark text-white p-4">
+            <h5 class="modal-title fw-bold mb-0">ব্যাচ ও শিক্ষক পরিবর্তন (Edit Batch)</h5>
+            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+          </div>
+          <div class="modal-body p-4">
+            <div class="mb-3">
+              <label class="form-label fw-bold small text-secondary">ব্যাচের নাম</label>
+              <input type="text" name="name" class="form-control" value="<%= batch.name %>" required>
+            </div>
+            <div class="mb-3">
+              <label class="form-label fw-bold small text-secondary">ক্যাটাগরি</label>
+              <select name="category" class="form-select" required>
+                <% categories.forEach(cat => { %>
+                  <option value="<%= cat %>" <%= batch.category === cat ? 'selected' : '' %>><%= cat %></option>
+                <% }) %>
+              </select>
+            </div>
+            <div class="mb-3">
+              <label class="form-label fw-bold small text-secondary">মোট ক্লাসের সংখ্যা</label>
+              <input type="number" name="totalClasses" class="form-control" value="<%= batch.totalClasses %>" required>
+            </div>
+            <div class="row g-2">
+              <div class="col-md-6 mb-2">
+                <label class="form-label fw-bold small text-secondary">শিক্ষকের নাম</label>
+                <input type="text" name="teacherName" class="form-control" value="<%= batch.teacherName || '' %>" placeholder="e.g. Tr. Shifa">
+              </div>
+              <div class="col-md-6 mb-2">
+                <label class="form-label fw-bold small text-secondary">শিক্ষকের মোবাইল নম্বর</label>
+                <input type="text" name="teacherPhone" class="form-control" value="<%= batch.teacherPhone || '' %>" placeholder="017xxxxxxxx">
+              </div>
+            </div>
+          </div>
+          <div class="modal-footer bg-light p-3">
+            <button type="button" class="btn btn-secondary rounded-3" data-bs-dismiss="modal">Cancel</button>
+            <button type="submit" class="btn btn-primary fw-bold rounded-3">Save Changes</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Edit Single Student Modal -->
+  <div class="modal fade" id="editStudentModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content border-0 shadow-lg rounded-4 overflow-hidden">
+        <form id="editStudentForm" method="POST">
+          <input type="hidden" name="batch_id" value="<%= batch._id %>">
+          <div class="modal-header bg-primary text-white p-3">
+            <h6 class="modal-title fw-bold mb-0">শিক্ষার্থীর তথ্য সংশোধন (Edit Student)</h6>
+            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+          </div>
+          <div class="modal-body p-4">
+            <div class="mb-3">
+              <label class="form-label fw-bold small text-secondary">শিক্ষার্থীর নাম</label>
+              <input type="text" id="editStudentName" name="name" class="form-control" required>
+            </div>
+            <div class="mb-3">
+              <label class="form-label fw-bold small text-secondary">মোবাইল নম্বর</label>
+              <input type="text" id="editStudentPhone" name="phone" class="form-control" required>
+            </div>
+          </div>
+          <div class="modal-footer bg-light p-3">
+            <button type="button" class="btn btn-secondary rounded-3" data-bs-dismiss="modal">Cancel</button>
+            <button type="submit" class="btn btn-primary fw-bold rounded-3">Update Student</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <script>
+    function openStudentEditModal(id, name, phone) {
+      const studentManageModalEl = document.getElementById('studentManageModal');
+      const studentManageModal = bootstrap.Modal.getInstance(studentManageModalEl);
+      if (studentManageModal) studentManageModal.hide();
+
+      document.getElementById('editStudentForm').action = '/student/edit/' + id;
+      document.getElementById('editStudentName').value = name;
+      document.getElementById('editStudentPhone').value = phone;
+
+      const editModal = new bootstrap.Modal(document.getElementById('editStudentModal'));
+      editModal.show();
+    }
+  </script>
+</body>
+</html>

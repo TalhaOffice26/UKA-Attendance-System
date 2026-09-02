@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Class <%= class_number %> Attendance - <%= batch.name %></title>
+  
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Hind+Siliguri:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+  <style>
+    :root {
+      --bg-surface: #f8fafc;
+      --card-border: #e2e8f0;
+      --present-bg: #ecfdf5;
+      --absent-bg: #fef2f2;
+    }
+
+    body {
+      font-family: 'Plus Jakarta Sans', 'Hind Siliguri', sans-serif;
+      background-color: var(--bg-surface);
+      color: #0f172a;
+    }
+
+    .main-card {
+      background: #ffffff;
+      border: 1px solid var(--card-border);
+      border-radius: 20px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.04);
+      overflow: hidden;
+    }
+
+    .header-banner {
+      background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+      padding: 24px 30px;
+      color: white;
+    }
+
+    .stat-box {
+      border-radius: 14px;
+      padding: 12px 18px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      transition: all 0.2s ease;
+    }
+    .stat-present { background: #dcfce7; color: #15803d; border: 1px solid #bbf7d0; }
+    .stat-absent { background: #fee2e2; color: #b91c1c; border: 1px solid #fecaca; }
+    .stat-total { background: #f1f5f9; color: #334155; border: 1px solid #e2e8f0; }
+
+    .table thead th {
+      background-color: #f8fafc;
+      color: #64748b;
+      font-size: 0.8rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      padding: 14px 16px;
+      border-bottom: 2px solid #e2e8f0;
+    }
+
+    .student-row {
+      transition: all 0.2s ease;
+    }
+    .student-row td {
+      padding: 14px 16px;
+      vertical-align: middle;
+      border-bottom: 1px solid #f1f5f9;
+    }
+
+    .student-row.is-absent {
+      background-color: var(--absent-bg) !important;
+    }
+    .student-row.is-absent .student-name {
+      color: #dc2626 !important;
+    }
+    .student-row.is-absent .phone-text {
+      color: #ef4444 !important;
+    }
+
+    .btn-status-group .btn-check:checked + .btn-present {
+      background-color: #10b981;
+      color: white;
+      border-color: #10b981;
+      box-shadow: 0 4px 10px rgba(16, 185, 129, 0.25);
+    }
+    .btn-status-group .btn-check:checked + .btn-absent {
+      background-color: #ef4444;
+      color: white;
+      border-color: #ef4444;
+      box-shadow: 0 4px 10px rgba(239, 68, 68, 0.25);
+    }
+
+    .btn-present, .btn-absent {
+      font-weight: 700;
+      font-size: 0.82rem;
+      padding: 6px 16px;
+      border-radius: 8px !important;
+      transition: all 0.15s ease;
+    }
+    .btn-present { border: 1px solid #a7f3d0; color: #059669; background: #fff; }
+    .btn-absent { border: 1px solid #fecaca; color: #dc2626; background: #fff; }
+
+    .wa-status-box {
+      background: #f0fdf4;
+      border: 1px solid #bbf7d0;
+      border-radius: 14px;
+      padding: 14px 18px;
+    }
+    .wa-already-sent-box {
+      background: #eff6ff;
+      border: 1px solid #bfdbfe;
+      border-radius: 14px;
+      padding: 12px 18px;
+      color: #1e40af;
+    }
+
+    /* Mobile Responsive Optimizations (No Horizontal Scroll) */
+    @media (max-width: 767.98px) {
+      .header-banner {
+        padding: 16px 20px;
+      }
+      .main-card .p-4 {
+        padding: 16px !important;
+      }
+      .col-hide-mobile {
+        display: none !important;
+      }
+      .student-row td {
+        padding: 12px 10px !important;
+      }
+      .mobile-student-meta {
+        display: block !important;
+      }
+      .mobile-action-cell {
+        width: 145px !important;
+        padding-right: 8px !important;
+      }
+      .btn-present, .btn-absent {
+        font-size: 0.72rem !important;
+        padding: 6px 8px !important;
+      }
+      .btn-present i, .btn-absent i {
+        display: none;
+      }
+      .student-name {
+        font-size: 0.95rem;
+        display: block;
+      }
+      .phone-text {
+        font-size: 0.75rem !important;
+        display: block;
+        margin-top: 2px;
+      }
+    }
+
+    @media (min-width: 768px) {
+      .mobile-student-meta {
+        display: none !important;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="container py-3 py-md-4" style="max-width: 920px;">
+    
+    <!-- Top Action Bar -->
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <a href="/batch/<%= batch._id %>" class="btn btn-outline-secondary btn-sm rounded-pill px-3 py-2 fw-semibold shadow-sm">
+        <i class="fa-solid fa-arrow-left me-1 me-md-2"></i> ব্যাচে ফিরুন
+      </a>
+      <a href="/report/daily/<%= batch._id %>/<%= class_number %>" target="_blank" class="btn btn-outline-primary btn-sm rounded-pill px-3 py-2 fw-bold shadow-sm">
+        <i class="fa-solid fa-print me-1"></i> Print Sheet
+      </a>
+    </div>
+
+    <!-- Success Message Alert -->
+    <% if (msgSentStatus) { %>
+      <div class="alert alert-success alert-dismissible fade show border-0 shadow-sm rounded-4 p-3 mb-4 d-flex align-items-center gap-3" role="alert">
+        <i class="fa-solid fa-circle-check fa-2x text-success"></i>
+        <div>
+          <strong class="d-block text-success fs-6">সফলভাবে হাজিরা সংরক্ষিত ও WhatsApp মেসেজ পাঠানো হয়েছে!</strong>
+          <small class="text-secondary">উপস্থিত এবং অনুপস্থিত সকল শিক্ষার্থীর অভিভাবকদের হোয়াটসঅ্যাপে নোটিফিকেশন পৌঁছে গেছে।</small>
+        </div>
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+      </div>
+    <% } %>
+
+    <div class="main-card mb-4">
+      
+      <div class="header-banner">
+        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
+          <div>
+            <span class="badge bg-white bg-opacity-25 rounded-pill px-3 py-1 mb-1 text-white fw-bold">
+              <i class="fa-solid fa-graduation-cap me-1"></i> <%= batch.category %>
+            </span>
+            <h4 class="fw-extrabold mb-0 fs-5 fs-md-3"><%= batch.name %></h4>
+          </div>
+          <div class="badge bg-warning text-dark fs-6 px-3 py-2 rounded-pill fw-bold shadow-sm">
+            <i class="fa-solid fa-book-open me-1"></i> Class <%= class_number %>/<%= batch.totalClasses %>
+          </div>
+        </div>
+      </div>
+
+      <div class="p-4">
+        
+        <!-- Live Status Bar -->
+        <div class="row g-2 g-md-3 mb-4">
+          <div class="col-4">
+            <div class="stat-box stat-total p-2 p-md-3">
+              <i class="fa-solid fa-users fa-lg fa-md-2x text-secondary d-none d-sm-block"></i>
+              <div>
+                <div class="fs-5 fs-md-4 fw-extrabold" id="totalCount"><%= students.length %></div>
+                <div class="small text-muted fw-semibold" style="font-size: 0.72rem;">মোট শিক্ষার্থী</div>
+              </div>
+            </div>
+          </div>
+          <div class="col-4">
+            <div class="stat-box stat-present p-2 p-md-3">
+              <i class="fa-solid fa-circle-check fa-lg fa-md-2x d-none d-sm-block"></i>
+              <div>
+                <div class="fs-5 fs-md-4 fw-extrabold" id="presentCount">0</div>
+                <div class="small fw-semibold" style="font-size: 0.72rem;">উপস্থিত</div>
+              </div>
+            </div>
+          </div>
+          <div class="col-4">
+            <div class="stat-box stat-absent p-2 p-md-3">
+              <i class="fa-solid fa-circle-xmark fa-lg fa-md-2x d-none d-sm-block"></i>
+              <div>
+                <div class="fs-5 fs-md-4 fw-extrabold" id="absentCount">0</div>
+                <div class="small fw-semibold" style="font-size: 0.72rem;">অনুপস্থিত</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- History Warning Tag -->
+        <% if (alreadyAlertSent) { %>
+          <div class="wa-already-sent-box d-flex align-items-center gap-2 mb-3">
+            <i class="fa-solid fa-bell-slash fs-5"></i>
+            <span class="fw-semibold small">
+              <strong>স্ট্যাটাস:</strong> এই ক্লাসের WhatsApp অ্যালার্ট পূর্বে পাঠানো হয়েছে।
+            </span>
+          </div>
+        <% } %>
+
+        <form action="/attendance/save" method="POST" id="attendanceForm">
+          <input type="hidden" name="batch_id" value="<%= batch._id %>">
+          <input type="hidden" name="class_number" value="<%= class_number %>">
+
+          <div class="row align-items-end g-3 mb-3 pb-3 border-bottom">
+            <div class="col-12 col-md-6">
+              <label class="form-label fw-bold text-dark mb-1 small">
+                <i class="fa-solid fa-calendar-days text-primary me-1"></i> ক্লাসের তারিখ:
+              </label>
+              <input type="date" name="class_date" class="form-control rounded-3" value="<%= savedDate %>" required>
+            </div>
+            <div class="col-12 col-md-6 text-md-end">
+              <div class="btn-group shadow-sm w-100 w-md-auto">
+                <button type="button" class="btn btn-outline-success btn-sm fw-bold px-3 py-2 w-50 w-md-auto" onclick="setAll('Present')">
+                  <i class="fa-solid fa-check-double me-1"></i> All Present
+                </button>
+                <button type="button" class="btn btn-outline-danger btn-sm fw-bold px-3 py-2 w-50 w-md-auto" onclick="setAll('Absent')">
+                  <i class="fa-solid fa-xmark me-1"></i> All Absent
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Attendance Table (No Scroll on Mobile) -->
+          <div class="rounded-3 border mb-4">
+            <table class="table mb-0 w-100" style="table-layout: fixed;">
+              <thead>
+                <tr>
+                  <th style="width: 45px;" class="text-center col-hide-mobile">#</th>
+                  <th>শিক্ষার্থী</th>
+                  <th class="col-hide-mobile">ফোন নম্বর</th>
+                  <th class="text-center mobile-action-cell" style="width: 220px;">হাজিরা</th>
+                </tr>
+              </thead>
+              <tbody>
+                <% if (students.length === 0) { %>
+                  <tr>
+                    <td colspan="4" class="text-center py-5 text-muted">এই ব্যাচে এখনো কোনো শিক্ষার্থী নেই।</td>
+                  </tr>
+                <% } %>
+
+                <% students.forEach((s, idx) => { 
+                    const isPresent = (attendanceMap[s._id.toString()] === 'Present' || (!attendanceMap[s._id.toString()] && !savedDate));
+                    const isAbsent = (attendanceMap[s._id.toString()] === 'Absent');
+                %>
+                  <tr class="student-row <%= isAbsent ? 'is-absent' : '' %>" id="row_<%= s._id %>">
+                    <!-- Serial (Desktop only) -->
+                    <td class="text-center text-muted fw-bold col-hide-mobile"><%= idx + 1 %></td>
+                    
+                    <!-- Student Details -->
+                    <td style="word-break: break-word;">
+                      <span class="fw-bold student-name text-dark"><%= s.name %></span>
+                      <small class="phone-text text-muted mobile-student-meta">
+                        <i class="fa-solid fa-phone me-1"></i><%= s.phone %>
+                      </small>
+                    </td>
+
+                    <!-- Phone Number (Desktop only) -->
+                    <td class="col-hide-mobile">
+                      <small class="phone-text text-muted"><i class="fa-solid fa-phone me-1"></i><%= s.phone %></small>
+                    </td>
+
+                    <!-- Status Action Buttons -->
+                    <td class="text-center mobile-action-cell">
+                      <div class="btn-group btn-status-group w-100" role="group">
+                        <input type="radio" class="btn-check status-radio present-radio" 
+                               name="attendance[<%= s._id %>]" 
+                               id="p_<%= s._id %>" 
+                               value="Present" 
+                               onchange="updateRowState('<%= s._id %>', 'Present')" 
+                               <%= isPresent ? 'checked' : '' %> required>
+                        <label class="btn btn-present w-50" for="p_<%= s._id %>">
+                          <i class="fa-solid fa-check me-1"></i> Present
+                        </label>
+
+                        <input type="radio" class="btn-check status-radio absent-radio" 
+                               name="attendance[<%= s._id %>]" 
+                               id="a_<%= s._id %>" 
+                               value="Absent" 
+                               onchange="updateRowState('<%= s._id %>', 'Absent')" 
+                               <%= isAbsent ? 'checked' : '' %>>
+                        <label class="btn btn-absent w-50" for="a_<%= s._id %>">
+                          <i class="fa-solid fa-xmark me-1"></i> Absent
+                        </label>
+                      </div>
+                    </td>
+                  </tr>
+                <% }) %>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- WhatsApp Notification Toggle Box -->
+          <div class="wa-status-box d-flex justify-content-between align-items-center mb-4">
+            <div class="d-flex align-items-center gap-2 gap-md-3">
+              <i class="fa-brands fa-whatsapp fa-2x text-success"></i>
+              <div>
+                <strong class="text-dark d-block small fw-bold">WhatsApp এ হাজিরার মেসেজ পাঠান</strong>
+                <small class="text-muted" style="font-size: 0.75rem;">
+                  <% if (alreadyAlertSent) { %>
+                    <span class="text-primary fw-semibold">পূর্বে মেসেজ পাঠানো হয়েছে। পুনরায় পাঠাতে টগল অন করুন।</span>
+                  <% } else { %>
+                    হাজিরা সাবমিট করার সাথে সাথে অভিভাবকদের নম্বরে অটো মেসেজ চলে যাবে।
+                  <% } %>
+                </small>
+              </div>
+            </div>
+            <div class="form-check form-switch fs-4 ms-2">
+              <input class="form-check-input" type="checkbox" name="send_whatsapp" id="sendWhatsAppToggle" <%= alreadyAlertSent ? '' : 'checked' %>>
+            </div>
+          </div>
+
+          <% if (students.length > 0) { %>
+            <div>
+              <button type="submit" class="btn btn-primary btn-lg w-100 fw-bold rounded-3 shadow-sm py-3 fs-6" id="submitBtn">
+                <i class="fa-solid fa-cloud-arrow-up me-2"></i> Save Attendance & Send Alert
+              </button>
+            </div>
+          <% } %>
+
+        </form>
+      </div>
+
+    </div>
+  </div>
+
+  <script>
+    function updateRowState(studentId, status) {
+      const row = document.getElementById('row_' + studentId);
+      if (status === 'Absent') {
+        row.classList.add('is-absent');
+      } else {
+        row.classList.remove('is-absent');
+      }
+      recalculateStats();
+    }
+
+    function setAll(status) {
+      if (status === 'Present') {
+        document.querySelectorAll('.present-radio').forEach(r => {
+          r.checked = true;
+          const studentId = r.id.replace('p_', '');
+          document.getElementById('row_' + studentId).classList.remove('is-absent');
+        });
+      } else {
+        document.querySelectorAll('.absent-radio').forEach(r => {
+          r.checked = true;
+          const studentId = r.id.replace('a_', '');
+          document.getElementById('row_' + studentId).classList.add('is-absent');
+        });
+      }
+      recalculateStats();
+    }
+
+    function recalculateStats() {
+      const presentCount = document.querySelectorAll('.present-radio:checked').length;
+      const absentCount = document.querySelectorAll('.absent-radio:checked').length;
+      
+      document.getElementById('presentCount').innerText = presentCount;
+      document.getElementById('absentCount').innerText = absentCount;
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      recalculateStats();
+
+      const form = document.getElementById('attendanceForm');
+      const submitBtn = document.getElementById('submitBtn');
+      if (form && submitBtn) {
+        form.addEventListener('submit', function() {
+          submitBtn.disabled = true;
+          submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status"></span> Saving & Sending Messages...';
+        });
+      }
+    });
+  </script>
+</body>
+</html>
