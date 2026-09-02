@@ -572,6 +572,19 @@ app.get('/report/full/:batch_id', isAuthenticated, async (req, res) => {
     res.status(500).send('Error generating full report: ' + error.message);
   }
 });
+// হেলথ চেক রাউট (UptimeRobot বা বাহ্যিক পিংয়ের জন্য)
+app.get('/ping', (req, res) => {
+  res.status(200).send('Pong! Server is awake.');
+});
 
+// সেল্ফ-পিং সার্ভিস: প্রতি ১০ মিনিটে একবার নিজেকে পিং করবে
+const SERVER_URL = process.env.RENDER_EXTERNAL_URL; // Render স্বয়ংক্রিয়ভাবে এটি সেট করে
+if (SERVER_URL) {
+  setInterval(() => {
+    fetch(`${SERVER_URL}/ping`)
+      .then(() => console.log('⏰ Keep-Alive self-ping sent successfully'))
+      .catch(err => console.error('Keep-Alive ping error:', err.message));
+  }, 10 * 60 * 1000); // প্রতি ১০ মিনিটে
+}
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Server running at http://localhost:${PORT}`));
