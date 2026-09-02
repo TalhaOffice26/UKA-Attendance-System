@@ -78,16 +78,34 @@ const waClient = new Client({
       '--disable-extensions',
       '--disable-default-apps',
       '--mute-audio',
+      '--disable-web-security',
+      '--disable-features=IsolateOrigins,site-per-process',
       '--blink-settings=imagesEnabled=false',
-      '--disable-background-networking',
-      '--disable-sync',
-      '--disable-translate',
-      '--hide-scrollbars',
-      '--metrics-recording-only',
-      '--no-default-browser-check',
-      '--safebrowsing-disable-auto-update',
-      '--js-flags=--max-old-space-size=160'
+      '--js-flags=--max-old-space-size=128'
     ]
+  }
+});
+
+// ক্রোম পেজ লোড হওয়ার পর অপ্রয়োজনীয় মিডিয়া ও ফন্ট ব্লক করে র‍্যাম ৮০MB-তে রাখা
+waClient.on('ready', async () => {
+  isWhatsAppReady = true;
+  currentQRCodeDataUrl = null;
+  console.log('\n✅ WhatsApp Connected & Ready to send Attendance Alerts!\n');
+
+  try {
+    if (waClient.pupPage) {
+      await waClient.pupPage.setRequestInterception(true);
+      waClient.pupPage.on('request', (req) => {
+        const resourceType = req.resourceType();
+        if (['image', 'stylesheet', 'font', 'media'].includes(resourceType)) {
+          req.abort();
+        } else {
+          req.continue();
+        }
+      });
+    }
+  } catch (err) {
+    console.warn('Page interception setup notice:', err.message);
   }
 });
 
@@ -106,16 +124,8 @@ waClient.on('authenticated', () => {
   currentQRCodeDataUrl = null;
 });
 
-// ready ইভেন্ট আসার পরই getChat সহ অভ্যন্তরীণ স্ক্রিপ্ট সচল হয়
-waClient.on('ready', () => {
-  isWhatsAppReady = true;
-  currentQRCodeDataUrl = null;
-  console.log('\n✅ WhatsApp Connected & Ready to send Attendance Alerts!\n');
-});
-
 waClient.on('loading_screen', (percent, message) => {
   console.log(`⏳ WhatsApp Loading: ${percent}% - ${message}`);
-  currentQRCodeDataUrl = null;
 });
 
 waClient.on('auth_failure', (msg) => {
@@ -140,7 +150,7 @@ function formatToWhatsAppId(phone) {
   if (!phone) return null;
   let cleaned = phone.toString().replace(/[^0-9]/g, '').trim();
   if (cleaned.startsWith('880')) {
-    // already 880
+    // already in 880 format
   } else if (cleaned.startsWith('01')) {
     cleaned = '88' + cleaned;
   } else if (cleaned.startsWith('1')) {
@@ -149,21 +159,21 @@ function formatToWhatsAppId(phone) {
   return cleaned + '@c.us';
 }
 
-// সেফ মেসেজ সেন্ডার (getChat এরর হ্যান্ডলিং ও রিট্রাই সহ)
+// সেফ মেসেজ ডেলিভারি ফাংশন
 async function safeSendMessage(waId, message, studentName) {
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
       if (!isWhatsAppReady) {
-        console.warn(`⏳ Waiting for WhatsApp client to be fully ready (Attempt ${attempt}/3)...`);
-        await new Promise(r => setTimeout(r, 3000));
+        console.warn(`⏳ Waiting for WhatsApp ready state (Attempt ${attempt}/3)...`);
+        await new Promise(r => setTimeout(r, 2500));
       }
       await waClient.sendMessage(waId, message);
       console.log(`✅ Message successfully delivered to: ${studentName}`);
       return true;
     } catch (err) {
-      console.warn(`⚠️ Attempt ${attempt} failed for ${studentName}: ${err.message}`);
+      console.warn(`⚠️ Attempt ${attempt} error for ${studentName}: ${err.message}`);
       if (attempt < 3) {
-        await new Promise(r => setTimeout(r, 2500)); // ২.৫ সেকেন্ড অপেক্ষা করে পুনরায় চেষ্টা
+        await new Promise(r => setTimeout(r, 2000));
       } else {
         console.error(`❌ Final Send Error to ${studentName}:`, err.message);
         return false;
@@ -468,7 +478,7 @@ app.get('/attendance/:batch_id/:class_number', isAuthenticated, async (req, res)
   }
 });
 
-// ১০. হাজিরা সংরক্ষণ ও সেফ মেসেজ প্রেরণ
+// ১০. হাজিরা সংরক্ষণ ও সরাসরি ব্যাকগ্রাউন্ড মেসেজ প্রেরণ
 app.post('/attendance/save', isAuthenticated, async (req, res) => {
   try {
     const { batch_id, class_number, class_date, attendance, send_whatsapp } = req.body;
