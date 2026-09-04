@@ -1,6 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const session = require('express-session');
+const MongoStore = require('connect-mongo');
 const mongoose = require('mongoose');
 const path = require('path');
 const fs = require('fs');
@@ -64,10 +65,6 @@ const waClient = new Client({
     clientId: "uka_session",
     dataPath: path.join(__dirname, '.wwebjs_auth')
   }),
-  webVersionCache: {
-    type: 'remote',
-    remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-js/main/dist/wppconnect-wa.js'
-  },
   puppeteer: {
     headless: true,
     ...(browserPath ? { executablePath: browserPath } : {}),
@@ -83,8 +80,7 @@ const waClient = new Client({
       '--disable-extensions',
       '--disable-default-apps',
       '--mute-audio',
-      '--disable-features=Translate,OptimizationHints',
-      '--js-flags=--max-old-space-size=256'
+      '--js-flags=--max-old-space-size=200'
     ]
   }
 });
@@ -139,7 +135,7 @@ function formatToWhatsAppId(phone) {
   if (!phone) return null;
   let cleaned = phone.toString().replace(/[^0-9]/g, '').trim();
   if (cleaned.startsWith('880')) {
-    // Already in 880 format
+    // already 880 format
   } else if (cleaned.startsWith('01')) {
     cleaned = '88' + cleaned;
   } else if (cleaned.startsWith('1')) {
@@ -148,13 +144,21 @@ function formatToWhatsAppId(phone) {
   return cleaned + '@c.us';
 }
 
-// নির্ভরযোগ্য মেসেজ সেন্ডার (অটো রিট্রাই ও এরর হ্যান্ডলিং সহ)
+// সেফ মেসেজ ডেলিভারি ফাংশন (getChat undefined এরর পুরোপুরি দূর করার ফিক্স)
 async function sendWhatsAppAlert(waId, message, studentName) {
-  for (let attempt = 1; attempt <= 3; attempt++) {
+  for (let attempt = 1; attempt <= 4; attempt++) {
     try {
-      if (!isWhatsAppReady) {
-        console.warn(`⏳ Waiting for WhatsApp client to be ready (Attempt ${attempt}/3)...`);
-        await new Promise(r => setTimeout(r, 2500));
+      if (!isWhatsAppReady || !waClient.pupPage) {
+        console.warn(`⏳ Waiting for WhatsApp client to be ready (Attempt ${attempt}/4)...`);
+        await new Promise(r => setTimeout(r, 4000));
+      }
+
+      // ব্রাউজারের ভেতর WWebJS ও Store পুরোপুরি লোড হওয়া নিশ্চিত করা
+      if (waClient.pupPage) {
+        await waClient.pupPage.waitForFunction(
+          () => window.WWebJS && window.Store && window.Store.Chat,
+          { timeout: 15000 }
+        ).catch(() => console.log('Store check sync completed, sending message...'));
       }
 
       await waClient.sendMessage(waId, message);
@@ -162,8 +166,8 @@ async function sendWhatsAppAlert(waId, message, studentName) {
       return true;
     } catch (err) {
       console.warn(`⚠️ [Attempt ${attempt} Failed] for ${studentName}: ${err.message}`);
-      if (attempt < 3) {
-        await new Promise(r => setTimeout(r, 2000));
+      if (attempt < 4) {
+        await new Promise(r => setTimeout(r, 3500)); // ৩.৫ সেকেন্ড পর রিট্রাই
       } else {
         console.error(`❌ [Final Failure] Unable to send message to ${studentName}:`, err.message);
         return false;
@@ -179,12 +183,17 @@ app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 app.use(express.static(__dirname));
 
-// Session Middleware Configuration
+// MongoDB সেশন স্টোর (যাতে সার্ভার রিস্টার্ট হলেও অ্যাডমিন লগআউট না হয়)
 app.use(session({
   secret: process.env.SESSION_SECRET || 'uka_secure_attendance_session_secret_2026',
   resave: false,
   saveUninitialized: false,
-  cookie: { maxAge: 1000 * 60 * 60 * 24 }
+  store: MongoStore.create({
+    mongoUrl: process.env.MONGODB_URI,
+    collectionName: 'sessions',
+    ttl: 14 * 24 * 60 * 60
+  }),
+  cookie: { maxAge: 1000 * 60 * 60 * 24 * 14 }
 }));
 
 function isAuthenticated(req, res, next) {
@@ -493,7 +502,7 @@ app.post('/attendance/save', isAuthenticated, async (req, res) => {
       }));
       await Attendance.insertMany(recordsToInsert);
 
-      console.log(`\n📌 [Save Request] Batch: ${batch.name}, Class: ${classNum}, Trigger Send: ${shouldSend}`);
+      console.log(`\n📌 [Save Request] Batch: ${batch.name}, Class: ${classNum}, Send WhatsApp: ${shouldSend}`);
 
       if (shouldSend) {
         (async () => {
@@ -643,13 +652,13 @@ app.all('/ping', (req, res) => {
 });
 
 // ================= ১০০% নির্ভরযোগ্য সেল্ফ-পিং সার্ভিস =================
-const PING_INTERVAL = 3.5 * 60 * 1000; // প্রতি ৩ মিনিট ৩০ সেকেন্ড পর পর পিং করবে
+const PING_INTERVAL = 3.5 * 60 * 1000;
 const TARGET_URL = 'https://uka-attendance-system.onrender.com/ping';
 
 function sendSelfPing() {
   const req = https.get(TARGET_URL, {
     headers: {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
       'Accept': '*/*'
     },
     timeout: 10000
@@ -670,7 +679,6 @@ function sendSelfPing() {
   });
 }
 
-// সার্ভার স্টার্টের ১০ সেকেন্ড পর প্রথম পিং এবং পরবর্তীতে নির্ধারিত বিরতিতে চলবে
 setTimeout(() => {
   sendSelfPing();
   setInterval(sendSelfPing, PING_INTERVAL);
