@@ -79,8 +79,7 @@ const waClient = new Client({
       '--disable-extensions',
       '--disable-default-apps',
       '--mute-audio',
-      '--renderer-process-limit=1',
-      '--js-flags=--max-old-space-size=128'
+      '--js-flags=--max-old-space-size=200'
     ]
   }
 });
@@ -98,9 +97,9 @@ waClient.on('qr', async (qr) => {
 waClient.on('authenticated', () => {
   console.log('🔐 WhatsApp Authenticated successfully!');
   currentQRCodeDataUrl = null;
-  isWhatsAppReady = true;
 });
 
+// ready ইভেন্ট আসার পরেই মেসেজিং স্টোর সক্রিয় হয়
 waClient.on('ready', () => {
   isWhatsAppReady = true;
   currentQRCodeDataUrl = null;
@@ -110,7 +109,6 @@ waClient.on('ready', () => {
 waClient.on('loading_screen', (percent, message) => {
   console.log(`⏳ WhatsApp Loading: ${percent}% - ${message}`);
   currentQRCodeDataUrl = null;
-  isWhatsAppReady = true;
 });
 
 waClient.on('auth_failure', (msg) => {
@@ -144,47 +142,53 @@ function formatToWhatsAppId(phone) {
   return cleaned + '@c.us';
 }
 
-// র‍্যাম-ক্র্যাশ মুক্ত সরাসরি মেসেজ সেন্ডার (Puppeteer Evaluate ব্যবহার করে)
+// ১০০% নির্ভরযোগ্য মেসেজ সেন্ডার (getChat বাইপাস করে সরাসরি পেজ ইনজেকশন)
 async function sendWhatsAppAlert(waId, message, studentName) {
-  for (let attempt = 1; attempt <= 3; attempt++) {
+  for (let attempt = 1; attempt <= 4; attempt++) {
     try {
-      if (!isWhatsAppReady || !waClient.pupPage) {
-        console.warn(`⏳ Waiting for WhatsApp page sync (Attempt ${attempt}/3)...`);
-        await new Promise(r => setTimeout(r, 3000));
+      if (!waClient.pupPage) {
+        console.warn(`⏳ WhatsApp page initializing (Attempt ${attempt}/4)...`);
+        await new Promise(r => setTimeout(r, 4000));
       }
 
-      // ক্লায়েন্টের ইন্টারনাল getChat ক্র্যাশ এড়াতে ব্রাউজারের ভেতরের উইন্ডো অবজেক্ট দিয়ে ডিসপ্যাচ
-      const sent = await waClient.pupPage.evaluate(async (chatId, text) => {
+      // ব্রাউজারের ভেতর সরাসরি WhatsApp-এর মেসেজ ডেসপ্যাচার কল করা
+      const sendResult = await waClient.pupPage.evaluate(async (chatId, text) => {
         try {
-          if (window.WWebJS && window.WWebJS.sendMessage) {
+          // ১. WWebJS মডিউল সক্রিয় থাকলে
+          if (window.WWebJS && typeof window.WWebJS.sendMessage === 'function') {
             await window.WWebJS.sendMessage(chatId, text, {});
-            return true;
+            return { success: true };
           }
-          if (window.Store && window.Store.SendTextMsgToChat) {
-            const chat = window.Store.Chat.get(chatId) || await window.Store.Chat.find(chatId);
-            await window.Store.SendTextMsgToChat(chat, text);
-            return true;
+
+          // ২. WhatsApp Web-এর ইন্টারনাল চ্যাট কন্ট্রোলার
+          if (window.Store) {
+            let chat = window.Store.Chat ? (window.Store.Chat.get(chatId) || await window.Store.Chat.find(chatId)) : null;
+            if (chat && window.Store.SendTextMsgToChat) {
+              await window.Store.SendTextMsgToChat(chat, text);
+              return { success: true };
+            }
           }
-          return false;
+          return { success: false, reason: 'Store not ready' };
         } catch (e) {
-          return false;
+          return { success: false, reason: e.message };
         }
       }, waId, message);
 
-      if (sent) {
+      if (sendResult && sendResult.success) {
         console.log(`✅ [Delivered] Message successfully sent to ${studentName} (${waId})`);
         return true;
       }
 
-      // ফলব্যাক: সরাসরি লাইব্রেরির sendMessage
+      // ৩. ফলব্যাক হিসেবে লাইব্রেরির ডিফল্ট sendMessage
       await waClient.sendMessage(waId, message);
-      console.log(`✅ [Delivered via fallback] Message sent to ${studentName}`);
+      console.log(`✅ [Delivered via fallback] Message successfully sent to ${studentName} (${waId})`);
       return true;
 
     } catch (err) {
       console.warn(`⚠️ [Attempt ${attempt} Failed] for ${studentName}: ${err.message}`);
-      if (attempt < 3) {
-        await new Promise(r => setTimeout(r, 2000));
+      if (attempt < 4) {
+        // চ্যাট স্টোর সিঙ্ক হওয়ার জন্য ৪ সেকেন্ড বিরতি
+        await new Promise(r => setTimeout(r, 4000));
       } else {
         console.error(`❌ [Final Failure] Unable to send message to ${studentName}:`, err.message);
         return false;
@@ -200,7 +204,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 app.use(express.static(__dirname));
 
-// সেশন মিডলওয়্যার
+// সেশন মিডলওয়্যার (ক্র্যাশমুক্ত কনফিগারেশন)
 let sessionConfig = {
   secret: process.env.SESSION_SECRET || 'uka_secure_attendance_session_secret_2026',
   resave: false,
