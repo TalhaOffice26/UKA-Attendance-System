@@ -1,7 +1,6 @@
 require('dotenv').config();
 const express = require('express');
 const session = require('express-session');
-const MongoStore = require('connect-mongo');
 const mongoose = require('mongoose');
 const path = require('path');
 const fs = require('fs');
@@ -144,7 +143,7 @@ function formatToWhatsAppId(phone) {
   return cleaned + '@c.us';
 }
 
-// সেফ মেসেজ ডেলিভারি ফাংশন (getChat undefined এরর পুরোপুরি দূর করার ফিক্স)
+// সেফ মেসেজ ডেলিভারি ফাংশন
 async function sendWhatsAppAlert(waId, message, studentName) {
   for (let attempt = 1; attempt <= 4; attempt++) {
     try {
@@ -153,7 +152,6 @@ async function sendWhatsAppAlert(waId, message, studentName) {
         await new Promise(r => setTimeout(r, 4000));
       }
 
-      // ব্রাউজারের ভেতর WWebJS ও Store পুরোপুরি লোড হওয়া নিশ্চিত করা
       if (waClient.pupPage) {
         await waClient.pupPage.waitForFunction(
           () => window.WWebJS && window.Store && window.Store.Chat,
@@ -167,7 +165,7 @@ async function sendWhatsAppAlert(waId, message, studentName) {
     } catch (err) {
       console.warn(`⚠️ [Attempt ${attempt} Failed] for ${studentName}: ${err.message}`);
       if (attempt < 4) {
-        await new Promise(r => setTimeout(r, 3500)); // ৩.৫ সেকেন্ড পর রিট্রাই
+        await new Promise(r => setTimeout(r, 3500));
       } else {
         console.error(`❌ [Final Failure] Unable to send message to ${studentName}:`, err.message);
         return false;
@@ -183,18 +181,35 @@ app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 app.use(express.static(__dirname));
 
-// MongoDB সেশন স্টোর (যাতে সার্ভার রিস্টার্ট হলেও অ্যাডমিন লগআউট না হয়)
-app.use(session({
+// সেশন মিডলওয়্যার (ক্র্যাশমুক্ত সুরক্ষিত কনফিগারেশন)
+let sessionConfig = {
   secret: process.env.SESSION_SECRET || 'uka_secure_attendance_session_secret_2026',
   resave: false,
   saveUninitialized: false,
-  store: MongoStore.create({
-    mongoUrl: process.env.MONGODB_URI,
-    collectionName: 'sessions',
-    ttl: 14 * 24 * 60 * 60
-  }),
-  cookie: { maxAge: 1000 * 60 * 60 * 24 * 14 }
-}));
+  cookie: { maxAge: 1000 * 60 * 60 * 24 * 7 } // ৭ দিন
+};
+
+try {
+  const connectMongo = require('connect-mongo');
+  const MongoStore = connectMongo.default || connectMongo;
+  if (typeof MongoStore.create === 'function') {
+    sessionConfig.store = MongoStore.create({
+      mongoUrl: process.env.MONGODB_URI,
+      collectionName: 'sessions',
+      ttl: 7 * 24 * 60 * 60
+    });
+  } else if (typeof MongoStore === 'function') {
+    const SessionStore = MongoStore(session);
+    sessionConfig.store = new SessionStore({
+      mongooseConnection: mongoose.connection,
+      ttl: 7 * 24 * 60 * 60
+    });
+  }
+} catch (e) {
+  console.warn('MongoStore fallback to memory store:', e.message);
+}
+
+app.use(session(sessionConfig));
 
 function isAuthenticated(req, res, next) {
   if (req.session && req.session.isAdmin) {
