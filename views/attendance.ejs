@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Class <%= class_number %> Attendance - <%= batch.name %></title>
-  
+
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Hind+Siliguri:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -118,7 +118,6 @@
       color: #1e40af;
     }
 
-    /* Mobile Responsive Optimizations (No Horizontal Scroll) */
     @media (max-width: 767.98px) {
       .header-banner {
         padding: 16px 20px;
@@ -167,7 +166,7 @@
 <body>
 
   <div class="container py-3 py-md-4" style="max-width: 920px;">
-    
+
     <!-- Top Action Bar -->
     <div class="d-flex justify-content-between align-items-center mb-3">
       <a href="/batch/<%= batch._id %>" class="btn btn-outline-secondary btn-sm rounded-pill px-3 py-2 fw-semibold shadow-sm">
@@ -183,15 +182,15 @@
       <div class="alert alert-success alert-dismissible fade show border-0 shadow-sm rounded-4 p-3 mb-4 d-flex align-items-center gap-3" role="alert">
         <i class="fa-solid fa-circle-check fa-2x text-success"></i>
         <div>
-          <strong class="d-block text-success fs-6">সফলভাবে হাজিরা সংরক্ষিত ও WhatsApp মেসেজ পাঠানো হয়েছে!</strong>
-          <small class="text-secondary">উপস্থিত এবং অনুপস্থিত সকল শিক্ষার্থীর অভিভাবকদের হোয়াটসঅ্যাপে নোটিফিকেশন পৌঁছে গেছে।</small>
+          <strong class="d-block text-success fs-6">সফলভাবে হাজিরা সংরক্ষিত ও WhatsApp বার্তা পাঠানো হয়েছে!</strong>
+          <small class="text-secondary">উপস্থিত এবং অনুপস্থিত সকল শিক্ষার্থীর অভিভাবকদের হোয়াটসঅ্যাপে নোটিফিকেশন পৌঁছে গেছে।</small>
         </div>
         <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
       </div>
     <% } %>
 
     <div class="main-card mb-4">
-      
+
       <div class="header-banner">
         <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
           <div>
@@ -207,7 +206,7 @@
       </div>
 
       <div class="p-4">
-        
+
         <!-- Live Status Bar -->
         <div class="row g-2 g-md-3 mb-4">
           <div class="col-4">
@@ -244,7 +243,7 @@
           <div class="wa-already-sent-box d-flex align-items-center gap-2 mb-3">
             <i class="fa-solid fa-bell-slash fs-5"></i>
             <span class="fw-semibold small">
-              <strong>স্ট্যাটাস:</strong> এই ক্লাসের WhatsApp অ্যালার্ট পূর্বে পাঠানো হয়েছে।
+              <strong>স্ট্যাটাস:</strong> এই ক্লাসের WhatsApp অ্যালার্ট পূর্বে পাঠানো হয়েছে।
             </span>
           </div>
         <% } %>
@@ -258,7 +257,7 @@
               <label class="form-label fw-bold text-dark mb-1 small">
                 <i class="fa-solid fa-calendar-days text-primary me-1"></i> ক্লাসের তারিখ:
               </label>
-              <input type="date" name="class_date" class="form-control rounded-3" value="<%= savedDate %>" required>
+              <input type="date" name="class_date" class="form-control rounded-3" value="<%= savedDate ? savedDate : new Date().toISOString().split('T')[0] %>" required>
             </div>
             <div class="col-12 col-md-6 text-md-end">
               <div class="btn-group shadow-sm w-100 w-md-auto">
@@ -272,7 +271,7 @@
             </div>
           </div>
 
-          <!-- Attendance Table (No Scroll on Mobile) -->
+          <!-- Attendance Table -->
           <div class="rounded-3 border mb-4">
             <table class="table mb-0 w-100" style="table-layout: fixed;">
               <thead>
@@ -295,10 +294,8 @@
                     const isAbsent = (attendanceMap[s._id.toString()] === 'Absent');
                 %>
                   <tr class="student-row <%= isAbsent ? 'is-absent' : '' %>" id="row_<%= s._id %>">
-                    <!-- Serial (Desktop only) -->
                     <td class="text-center text-muted fw-bold col-hide-mobile"><%= idx + 1 %></td>
-                    
-                    <!-- Student Details -->
+
                     <td style="word-break: break-word;">
                       <span class="fw-bold student-name text-dark"><%= s.name %></span>
                       <small class="phone-text text-muted mobile-student-meta">
@@ -306,12 +303,10 @@
                       </small>
                     </td>
 
-                    <!-- Phone Number (Desktop only) -->
                     <td class="col-hide-mobile">
                       <small class="phone-text text-muted"><i class="fa-solid fa-phone me-1"></i><%= s.phone %></small>
                     </td>
 
-                    <!-- Status Action Buttons -->
                     <td class="text-center mobile-action-cell">
                       <div class="btn-group btn-status-group w-100" role="group">
                         <input type="radio" class="btn-check status-radio present-radio" 
@@ -349,15 +344,15 @@
                 <strong class="text-dark d-block small fw-bold">WhatsApp এ হাজিরার মেসেজ পাঠান</strong>
                 <small class="text-muted" style="font-size: 0.75rem;">
                   <% if (alreadyAlertSent) { %>
-                    <span class="text-primary fw-semibold">পূর্বে মেসেজ পাঠানো হয়েছে। পুনরায় পাঠাতে টগল অন করুন।</span>
+                    <span class="text-primary fw-semibold">পূর্বে মেসেজ পাঠানো হয়েছে। পুনরায় পাঠাতে টগল অন রাখুন।</span>
                   <% } else { %>
-                    হাজিরা সাবমিট করার সাথে সাথে অভিভাবকদের নম্বরে অটো মেসেজ চলে যাবে।
+                    হাজিরা সাবমিট করার সাথে সাথে অভিভাবকদের নম্বরে মেসেজ কিউতে চলে যাবে।
                   <% } %>
                 </small>
               </div>
             </div>
             <div class="form-check form-switch fs-4 ms-2">
-              <input class="form-check-input" type="checkbox" name="send_whatsapp" id="sendWhatsAppToggle" <%= alreadyAlertSent ? '' : 'checked' %>>
+              <input class="form-check-input" type="checkbox" name="send_whatsapp" id="sendWhatsAppToggle" value="true" <%= alreadyAlertSent ? '' : 'checked' %>>
             </div>
           </div>
 
@@ -406,7 +401,7 @@
     function recalculateStats() {
       const presentCount = document.querySelectorAll('.present-radio:checked').length;
       const absentCount = document.querySelectorAll('.absent-radio:checked').length;
-      
+
       document.getElementById('presentCount').innerText = presentCount;
       document.getElementById('absentCount').innerText = absentCount;
     }
@@ -416,10 +411,22 @@
 
       const form = document.getElementById('attendanceForm');
       const submitBtn = document.getElementById('submitBtn');
+      const waToggle = document.getElementById('sendWhatsAppToggle');
+
+      if (waToggle && submitBtn) {
+        waToggle.addEventListener('change', function() {
+          if (this.checked) {
+            submitBtn.innerHTML = '<i class="fa-solid fa-cloud-arrow-up me-2"></i> Save Attendance & Send Alert';
+          } else {
+            submitBtn.innerHTML = '<i class="fa-solid fa-floppy-disk me-2"></i> Save Attendance Only';
+          }
+        });
+      }
+
       if (form && submitBtn) {
         form.addEventListener('submit', function() {
           submitBtn.disabled = true;
-          submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status"></span> Saving & Sending Messages...';
+          submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status"></span> Saving & Processing Queue...';
         });
       }
     });
