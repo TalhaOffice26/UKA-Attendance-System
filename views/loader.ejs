@@ -1,0 +1,115 @@
+<!-- Universal System Loader -->
+<div id="globalSystemLoader">
+  <div class="loader-box">
+    <div class="spinner-border text-light" style="width: 3.5rem; height: 3.5rem; border-width: 0.35rem;" role="status"></div>
+    <div class="loader-text">অনুগ্রহ করে অপেক্ষা করুন...</div>
+  </div>
+</div>
+
+<style>
+  #globalSystemLoader {
+    position: fixed;
+    inset: 0;
+    width: 100vw;
+    height: 100vh;
+    background: rgba(15, 23, 42, 0.65);
+    backdrop-filter: blur(4px);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 9999999;
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transition: opacity 0.2s ease, visibility 0.2s ease;
+  }
+
+  #globalSystemLoader.active {
+    opacity: 1;
+    visibility: visible;
+    pointer-events: all;
+  }
+
+  .loader-box {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 15px;
+  }
+
+  .loader-text {
+    color: #ffffff;
+    font-size: 1rem;
+    font-weight: 700;
+    font-family: 'Hind Siliguri', 'Plus Jakarta Sans', sans-serif;
+  }
+</style>
+
+<script>
+  (function () {
+    const loader = document.getElementById('globalSystemLoader');
+
+    window.showGlobalLoader = function () {
+      if (loader) loader.classList.add('active');
+    };
+
+    window.hideGlobalLoader = function () {
+      if (loader) loader.classList.remove('active');
+    };
+
+    // ১. যেকোনো সাধারণ ফর্ম সাবমিট হলে
+    document.addEventListener('submit', function (e) {
+      const form = e.target;
+      // AJAX ফর্ম ছাড়া বাকি সব ফর্মে স্পিনার চালু হবে
+      if (form.id === 'ajaxAddStudentForm' || form.getAttribute('data-no-loader') === 'true') {
+        return;
+      }
+      window.showGlobalLoader();
+    });
+
+    // ২. যেকোনো বাটন বা লিংক ক্লিকে স্মার্ট ফিল্টারিং
+    document.addEventListener('click', function (e) {
+      // লিংক চেক
+      const link = e.target.closest('a');
+      if (link) {
+        const href = link.getAttribute('href');
+        const target = link.getAttribute('target');
+
+        // হ্যাশ (#), নতুন ট্যাব, প্রিন্ট শিট বা জাভাস্ক্রিপ্ট ভয়েড লিংক বাদ যাবে
+        if (
+          !href ||
+          href.startsWith('#') ||
+          href.startsWith('javascript:') ||
+          target === '_blank' ||
+          link.getAttribute('data-bs-toggle') || // Bootstrap Modal/Offcanvas
+          link.getAttribute('data-no-loader') === 'true'
+        ) {
+          return;
+        }
+        window.showGlobalLoader();
+        return;
+      }
+
+      // ফর্মের সাধারণ সাবমিট বাটন ছাড়া যেকোনো অ্যাকশন বাটন
+      const btn = e.target.closest('button');
+      if (btn) {
+        // মডাল খোলা/বন্ধ, রেডিও টগল বা AJAX বাটন হলে ফুল-স্ক্রিন লোডার লাগবে না
+        if (
+          btn.getAttribute('data-bs-toggle') ||
+          btn.getAttribute('data-bs-dismiss') ||
+          btn.type === 'button' ||
+          btn.id === 'ajaxAddBtn' ||
+          btn.getAttribute('data-no-loader') === 'true'
+        ) {
+          return;
+        }
+        // টাইপ সাবমিট বা অন্য কোনো বাটন ফর্মের অংশ হলে ফর্মের সাবমিট ইভেন্টই ধরবে
+      }
+    });
+
+    // ৩. ব্যাক/ফরোয়ার্ড বা হিস্ট্রি ক্যাশ থেকে পেজ ব্যাক আসলে লোডার হাইড হবে
+    window.addEventListener('pageshow', function () {
+      window.hideGlobalLoader();
+    });
+  })();
+</script>

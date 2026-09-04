@@ -425,11 +425,14 @@
 
       if (form && submitBtn) {
         form.addEventListener('submit', function() {
-          submitBtn.disabled = true;
           submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status"></span> Saving & Processing Queue...';
+          if (window.showGlobalLoader) window.showGlobalLoader();
+          setTimeout(() => { submitBtn.disabled = true; }, 10);
         });
       }
     });
   </script>
+
+  <%- include('loader') %>
 </body>
 </html>
