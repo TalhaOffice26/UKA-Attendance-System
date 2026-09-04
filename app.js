@@ -3,11 +3,17 @@ const express = require('express');
 const session = require('express-session');
 const mongoose = require('mongoose');
 const path = require('path');
-const fs = require('fs');
 const https = require('https');
-const { Client, RemoteAuth } = require('whatsapp-web.js');
-const { MongoStore } = require('wwebjs-mongo');
 const QRCode = require('qrcode');
+const pino = require('pino');
+const {
+  default: makeWASocket,
+  DisconnectReason,
+  initAuthCreds,
+  BufferJSON,
+  proto,
+  fetchLatestBaileysVersion
+} = require('@whiskeysockets/baileys');
 
 const Batch = require('./models/Batch');
 const Student = require('./models/Student');
@@ -18,142 +24,153 @@ const app = express();
 // ================= MongoDB Connection =================
 const mongoURI = process.env.MONGODB_URI;
 
-// ================= WhatsApp Web State =================
-let waClient = null;
+// ================= WhatsApp (Baileys) State =================
+// Chrome/Puppeteer সম্পূর্ণভাবে বাদ দেওয়া হয়েছে — Baileys সরাসরি WhatsApp-এর
+// মাল্টি-ডিভাইস প্রোটোকলে WebSocket দিয়ে কথা বলে, তাই মেমরি ব্যবহার অনেক কম
+// (Render free tier / 512MB RAM-এ চালানোর জন্য উপযুক্ত)।
+let sock = null;
 let isWhatsAppReady = false;
 let currentQRCodeDataUrl = null;
-let waReadyAt = 0;          // timestamp (ms) when 'ready' fired
-const WA_WARMUP_MS = 15000; // wait this long after 'ready' before trusting Store is fully synced
+let waReadyAt = 0;
+const WA_WARMUP_MS = 3000; // 'open' হওয়ার পর ছোট্ট বাফার, নিরাপদে থাকার জন্য
 let waSendQueueBusy = false;
 const waSendQueue = [];
+let waStarting = false;
 
-function getExecutablePath() {
-  if (process.env.PUPPETEER_EXECUTABLE_PATH && fs.existsSync(process.env.PUPPETEER_EXECUTABLE_PATH)) {
-    return process.env.PUPPETEER_EXECUTABLE_PATH;
-  }
+// ---- MongoDB-তে Baileys auth state (creds + keys) সংরক্ষণের জন্য মডেল ----
+const authSchema = new mongoose.Schema(
+  { _id: String, value: String },
+  { collection: 'whatsapp_auth', versionKey: false }
+);
+const WhatsAppAuth = mongoose.models.WhatsAppAuth || mongoose.model('WhatsAppAuth', authSchema);
 
-  const localCachePath = path.join(__dirname, '.cache', 'puppeteer', 'chrome');
-  if (fs.existsSync(localCachePath)) {
-    try {
-      const versions = fs.readdirSync(localCachePath);
-      for (const ver of versions) {
-        const candidate = path.join(localCachePath, ver, 'chrome-linux64', 'chrome');
-        if (fs.existsSync(candidate)) return candidate;
-      }
-    } catch (e) {
-      console.warn('Error reading local puppeteer cache:', e.message);
-    }
-  }
-
-  const fallbackPaths = [
-    '/opt/render/.cache/puppeteer/chrome/linux-146.0.7680.31/chrome-linux64/chrome',
-    '/opt/render/project/src/.cache/puppeteer/chrome/linux-146.0.7680.31/chrome-linux64/chrome',
-    'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
-    'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
-    'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
-    '/usr/bin/google-chrome',
-    '/usr/bin/chromium-browser',
-    '/usr/bin/chromium'
-  ];
-
-  return fallbackPaths.find(p => p && fs.existsSync(p)) || null;
+async function writeAuthData(id, data) {
+  const value = JSON.stringify(data, BufferJSON.replacer);
+  await WhatsAppAuth.updateOne({ _id: id }, { $set: { value } }, { upsert: true });
 }
 
-const browserPath = getExecutablePath();
-console.log('Detected Browser Executable Path:', browserPath || 'Default Puppeteer Path');
+async function readAuthData(id) {
+  const doc = await WhatsAppAuth.findOne({ _id: id }).lean();
+  if (!doc) return null;
+  return JSON.parse(doc.value, BufferJSON.reviver);
+}
 
-// ================= WhatsApp Client Bootstrap (needs Mongo connected first) =================
-// RemoteAuth সেশন MongoDB-তে সেভ করে, তাই Render restart/redeploy হলেও বারবার QR স্ক্যান করা লাগবে না।
-function createWhatsAppClient(mongoStore) {
-  waClient = new Client({
-    authStrategy: new RemoteAuth({
-      store: mongoStore,
-      clientId: 'uka_session',
-      backupSyncIntervalMs: 300000 // প্রতি ৫ মিনিটে সেশন Mongo-তে ব্যাকআপ (মিনিমাম 60000)
-    }),
-    puppeteer: {
-      headless: true,
-      ...(browserPath ? { executablePath: browserPath } : {}),
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-accelerated-2d-canvas',
-        '--no-first-run',
-        '--no-zygote',
-        '--single-process',
-        '--disable-gpu',
-        '--disable-extensions',
-        '--disable-default-apps',
-        '--mute-audio',
-        '--js-flags=--max-old-space-size=300'
-      ]
-    }
-  });
+async function removeAuthData(id) {
+  await WhatsAppAuth.deleteOne({ _id: id });
+}
 
-  waClient.on('qr', async (qr) => {
-    try {
-      currentQRCodeDataUrl = await QRCode.toDataURL(qr, { margin: 2, width: 280 });
-      isWhatsAppReady = false;
-      waReadyAt = 0;
-      console.log('📱 New WhatsApp QR Code generated for web portal.');
-    } catch (err) {
-      console.error('QR generation error:', err);
-    }
-  });
+async function clearAllAuthData() {
+  await WhatsAppAuth.deleteMany({});
+}
 
-  waClient.on('authenticated', () => {
-    console.log('🔐 WhatsApp Authenticated successfully!');
-    currentQRCodeDataUrl = null;
-  });
+// Baileys-এর জন্য কাস্টম Mongo-ব্যাকড auth state (multi-file auth state এর বদলে)
+async function useMongoAuthState() {
+  const creds = (await readAuthData('creds')) || initAuthCreds();
 
-  waClient.on('remote_session_saved', () => {
-    console.log('☁️  WhatsApp session backed up to MongoDB.');
-  });
+  return {
+    state: {
+      creds,
+      keys: {
+        get: async (type, ids) => {
+          const data = {};
+          await Promise.all(
+            ids.map(async (id) => {
+              let value = await readAuthData(`${type}-${id}`);
+              if (type === 'app-state-sync-key' && value) {
+                value = proto.Message.AppStateSyncKeyData.fromObject(value);
+              }
+              data[id] = value;
+            })
+          );
+          return data;
+        },
+        set: async (data) => {
+          const tasks = [];
+          for (const category in data) {
+            for (const id in data[category]) {
+              const value = data[category][id];
+              const key = `${category}-${id}`;
+              tasks.push(value ? writeAuthData(key, value) : removeAuthData(key));
+            }
+          }
+          await Promise.all(tasks);
+        }
+      }
+    },
+    saveCreds: () => writeAuthData('creds', creds)
+  };
+}
 
-  // ready ইভেন্ট আসার পরেই মেসেজিং স্টোর সক্রিয় হয়, তবে ঠিক তখনই Store সম্পূর্ণ সিঙ্ক নাও থাকতে পারে,
-  // তাই একটা ওয়ার্ম-আপ পিরিয়ড রাখা হয়েছে (WA_WARMUP_MS)
-  waClient.on('ready', () => {
-    isWhatsAppReady = true;
-    waReadyAt = Date.now();
-    currentQRCodeDataUrl = null;
-    console.log('\n✅ WhatsApp Connected & Ready to send Attendance Alerts!\n');
-  });
+async function startWhatsApp() {
+  if (waStarting) return;
+  waStarting = true;
+  try {
+    const { state, saveCreds } = await useMongoAuthState();
+    const { version } = await fetchLatestBaileysVersion();
 
-  waClient.on('loading_screen', (percent, message) => {
-    console.log(`⏳ WhatsApp Loading: ${percent}% - ${message}`);
-    currentQRCodeDataUrl = null;
-  });
+    sock = makeWASocket({
+      version,
+      auth: state,
+      logger: pino({ level: 'silent' }),
+      browser: ['UKA Attendance System', 'Chrome', '1.0.0'],
+      syncFullHistory: false,
+      markOnlineOnConnect: false,
+      generateHighQualityLinkPreview: false
+    });
 
-  waClient.on('auth_failure', (msg) => {
-    isWhatsAppReady = false;
-    waReadyAt = 0;
-    currentQRCodeDataUrl = null;
-    console.error('❌ WhatsApp Auth Failure:', msg);
-  });
+    sock.ev.on('creds.update', saveCreds);
 
-  waClient.on('disconnected', (reason) => {
-    isWhatsAppReady = false;
-    waReadyAt = 0;
-    currentQRCodeDataUrl = null;
-    console.log('⚠️ WhatsApp Disconnected:', reason);
-    // সামান্য বিরতি দিয়ে রি-ইনিশিয়ালাইজ, যাতে পরপর ক্র্যাশ-লুপ না হয়
-    setTimeout(() => {
-      waClient.initialize().catch(err => console.error('Re-init error:', err));
-    }, 5000);
-  });
+    sock.ev.on('connection.update', async (update) => {
+      const { connection, lastDisconnect, qr } = update;
 
-  waClient.initialize().catch(err => {
-    console.error('Initial WhatsApp launch error:', err);
-  });
+      if (qr) {
+        try {
+          currentQRCodeDataUrl = await QRCode.toDataURL(qr, { margin: 2, width: 280 });
+          isWhatsAppReady = false;
+          waReadyAt = 0;
+          console.log('📱 New WhatsApp QR Code generated for web portal.');
+        } catch (err) {
+          console.error('QR generation error:', err);
+        }
+      }
+
+      if (connection === 'open') {
+        isWhatsAppReady = true;
+        waReadyAt = Date.now();
+        currentQRCodeDataUrl = null;
+        console.log('\n✅ WhatsApp Connected & Ready to send Attendance Alerts!\n');
+      }
+
+      if (connection === 'close') {
+        isWhatsAppReady = false;
+        waReadyAt = 0;
+        const statusCode = lastDisconnect?.error?.output?.statusCode;
+        const loggedOut = statusCode === DisconnectReason.loggedOut;
+        console.log('⚠️ WhatsApp Disconnected. StatusCode:', statusCode, 'LoggedOut:', loggedOut);
+
+        waStarting = false;
+
+        if (loggedOut) {
+          console.log('🔒 Session logged out — clearing saved session, new QR will be needed.');
+          await clearAllAuthData().catch(e => console.error('Clear auth error:', e.message));
+          setTimeout(() => startWhatsApp().catch(err => console.error('Re-init error:', err)), 3000);
+        } else {
+          setTimeout(() => startWhatsApp().catch(err => console.error('Re-init error:', err)), 5000);
+        }
+      }
+    });
+  } catch (err) {
+    waStarting = false;
+    console.error('WhatsApp start error:', err.message);
+    setTimeout(() => startWhatsApp().catch(e => console.error('Re-init error:', e)), 8000);
+  }
 }
 
 function isWaFullyWarmedUp() {
   return isWhatsAppReady && waReadyAt > 0 && (Date.now() - waReadyAt) >= WA_WARMUP_MS;
 }
 
-// Helper: BD Phone Number to WhatsApp ID Formatter
+// Helper: BD Phone Number to WhatsApp JID Formatter (Baileys uses @s.whatsapp.net)
 function formatToWhatsAppId(phone) {
   if (!phone) return null;
   let cleaned = phone.toString().replace(/[^0-9]/g, '').trim();
@@ -164,73 +181,37 @@ function formatToWhatsAppId(phone) {
   } else if (cleaned.startsWith('1')) {
     cleaned = '880' + cleaned;
   }
-  return cleaned + '@c.us';
-}
-
-// মেসেজ পাঠানোর প্রকৃত লজিক (একটা মেসেজের জন্য)
-async function trySendOnce(waId, message) {
-  // প্রথমে স্ট্যান্ডার্ড লাইব্রেরি মেথড দিয়ে চেষ্টা — এটাই সবচেয়ে নির্ভরযোগ্য যদি Store রেডি থাকে
-  try {
-    await waClient.sendMessage(waId, message);
-    return { success: true };
-  } catch (err) {
-    // ফলব্যাক: সরাসরি পেজ ইনজেকশন (কিছু edge-case-এ getChat ব্যর্থ হলে)
-    try {
-      const sendResult = await waClient.pupPage.evaluate(async (chatId, text) => {
-        try {
-          if (window.WWebJS && typeof window.WWebJS.sendMessage === 'function') {
-            await window.WWebJS.sendMessage(chatId, text, {});
-            return { success: true };
-          }
-          if (window.Store) {
-            let chat = window.Store.Chat ? (window.Store.Chat.get(chatId) || await window.Store.Chat.find(chatId)) : null;
-            if (chat && window.Store.SendTextMsgToChat) {
-              await window.Store.SendTextMsgToChat(chat, text);
-              return { success: true };
-            }
-          }
-          return { success: false, reason: 'Store not ready' };
-        } catch (e) {
-          return { success: false, reason: e.message };
-        }
-      }, waId, message);
-
-      if (sendResult && sendResult.success) return { success: true };
-      return { success: false, reason: sendResult ? sendResult.reason : err.message };
-    } catch (fallbackErr) {
-      return { success: false, reason: fallbackErr.message };
-    }
-  }
+  return cleaned + '@s.whatsapp.net';
 }
 
 // রিট্রাই + ওয়েট সহ মেসেজ সেন্ডার — ready না হওয়া পর্যন্ত পাঠানো শুরু করে না
 async function sendWhatsAppAlert(waId, message, studentName) {
-  // ওয়ার্ম-আপ পিরিয়ড শেষ না হওয়া পর্যন্ত অপেক্ষা (সর্বোচ্চ ৩০ সেকেন্ড)
   let waited = 0;
   while (!isWaFullyWarmedUp() && waited < 30000) {
-    if (!waClient) return false;
+    if (!sock) return false;
     console.warn(`⏳ WhatsApp not fully ready yet, waiting before sending to ${studentName}...`);
     await new Promise(r => setTimeout(r, 3000));
     waited += 3000;
   }
 
-  if (!isWhatsAppReady || !waClient) {
+  if (!isWhatsAppReady || !sock) {
     console.error(`❌ [Skipped] WhatsApp not connected — could not send to ${studentName}`);
     return false;
   }
 
-  for (let attempt = 1; attempt <= 4; attempt++) {
-    const result = await trySendOnce(waId, message);
-    if (result.success) {
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      await sock.sendMessage(waId, { text: message });
       console.log(`✅ [Delivered] Message successfully sent to ${studentName} (${waId})`);
       return true;
-    }
-    console.warn(`⚠️ [Attempt ${attempt} Failed] for ${studentName}: ${result.reason}`);
-    if (attempt < 4) {
-      await new Promise(r => setTimeout(r, 4000));
-    } else {
-      console.error(`❌ [Final Failure] Unable to send message to ${studentName}: ${result.reason}`);
-      return false;
+    } catch (err) {
+      console.warn(`⚠️ [Attempt ${attempt} Failed] for ${studentName}: ${err.message}`);
+      if (attempt < 3) {
+        await new Promise(r => setTimeout(r, 3000));
+      } else {
+        console.error(`❌ [Final Failure] Unable to send message to ${studentName}: ${err.message}`);
+        return false;
+      }
     }
   }
   return false;
@@ -340,8 +321,12 @@ app.get('/whatsapp/status', isAuthenticated, (req, res) => {
 // WhatsApp Logout Endpoint
 app.post('/whatsapp/logout', isAuthenticated, async (req, res) => {
   try {
-    if (waClient && isWhatsAppReady) {
-      await waClient.logout(); // RemoteAuth: এটি Mongo-তে থাকা সেশন ব্যাকআপও মুছে দেয়
+    if (sock) {
+      try {
+        await sock.logout();
+      } catch (e) {
+        console.warn('Logout notice:', e.message);
+      }
     }
     isWhatsAppReady = false;
     waReadyAt = 0;
@@ -356,35 +341,32 @@ app.post('/whatsapp/logout', isAuthenticated, async (req, res) => {
 // WhatsApp Cache & Session Reset Endpoint
 app.post('/whatsapp/reset-cache', isAuthenticated, async (req, res) => {
   try {
-    console.log('🔄 Clearing WhatsApp Cache & Session via Web Panel...');
-    if (waClient) {
+    console.log('🔄 Clearing WhatsApp Session via Web Panel...');
+    if (sock) {
       try {
-        await waClient.logout();
+        await sock.logout();
       } catch (e) {
         console.warn('Logout during reset notice:', e.message);
       }
       try {
-        await waClient.destroy();
+        sock.end(undefined);
       } catch (e) {
-        console.warn('Client destroy error:', e.message);
+        console.warn('Socket end notice:', e.message);
       }
     }
 
     isWhatsAppReady = false;
     waReadyAt = 0;
     currentQRCodeDataUrl = null;
+    waStarting = false;
 
-    // লোকাল ক্যাশ ফোল্ডারও (থাকলে) মুছে দেওয়া, যদিও RemoteAuth মূল সোর্স অফ ট্রুথ MongoDB
-    const cacheDir = path.join(__dirname, '.wwebjs_cache');
-    if (fs.existsSync(cacheDir)) fs.rmSync(cacheDir, { recursive: true, force: true });
-
-    const mongoStore = new MongoStore({ mongoose });
-    createWhatsAppClient(mongoStore);
-    console.log('✅ WhatsApp Cache cleared and re-initialized!');
+    await clearAllAuthData();
+    await startWhatsApp();
+    console.log('✅ WhatsApp session cleared and re-initialized!');
     res.redirect('/');
   } catch (err) {
-    console.error('Failed to reset cache:', err);
-    res.status(500).send('Cache reset failed: ' + err.message);
+    console.error('Failed to reset session:', err);
+    res.status(500).send('Session reset failed: ' + err.message);
   }
 });
 
@@ -785,21 +767,16 @@ setTimeout(() => {
   setInterval(sendSelfPing, PING_INTERVAL);
 }, 10 * 1000);
 
-// ================= Start: connect Mongo first, THEN WhatsApp client, THEN HTTP server =================
+// ================= Start: connect Mongo first, THEN WhatsApp socket, THEN HTTP server =================
 const PORT = process.env.PORT || 3000;
 
 mongoose.connect(mongoURI)
   .then(() => {
     console.log('MongoDB Atlas Connected Successfully!');
-
-    // RemoteAuth-এর জন্য mongoose কানেকশন রেডি থাকা আবশ্যক
-    const mongoStore = new MongoStore({ mongoose });
-    createWhatsAppClient(mongoStore);
-
+    startWhatsApp().catch(err => console.error('WhatsApp init error:', err));
     app.listen(PORT, () => console.log(`Server running at http://localhost:${PORT}`));
   })
   .catch(err => {
     console.error('MongoDB Connection Error:', err);
-    // MongoDB না থাকলে WhatsApp session persist করা যাবে না, তবু panel চালু রাখা হলো
     app.listen(PORT, () => console.log(`Server running at http://localhost:${PORT} (DEGRADED: no MongoDB)`));
   });
