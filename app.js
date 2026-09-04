@@ -25,19 +25,16 @@ const app = express();
 const mongoURI = process.env.MONGODB_URI;
 
 // ================= WhatsApp (Baileys) State =================
-// Chrome/Puppeteer সম্পূর্ণভাবে বাদ দেওয়া হয়েছে — Baileys সরাসরি WhatsApp-এর
-// মাল্টি-ডিভাইস প্রোটোকলে WebSocket দিয়ে কথা বলে, তাই মেমরি ব্যবহার অনেক কম
-// (Render free tier / 512MB RAM-এ চালানোর জন্য উপযুক্ত)।
 let sock = null;
 let isWhatsAppReady = false;
 let currentQRCodeDataUrl = null;
 let waReadyAt = 0;
-const WA_WARMUP_MS = 3000; // 'open' হওয়ার পর ছোট্ট বাফার, নিরাপদে থাকার জন্য
+const WA_WARMUP_MS = 3000;
 let waSendQueueBusy = false;
 const waSendQueue = [];
 let waStarting = false;
 
-// ---- MongoDB-তে Baileys auth state (creds + keys) সংরক্ষণের জন্য মডেল ----
+// MongoDB-তে সেশন ডাটা সংরক্ষণের স্কিমা
 const authSchema = new mongoose.Schema(
   { _id: String, value: String },
   { collection: 'whatsapp_auth', versionKey: false }
@@ -63,7 +60,7 @@ async function clearAllAuthData() {
   await WhatsAppAuth.deleteMany({});
 }
 
-// Baileys-এর জন্য কাস্টম Mongo-ব্যাকড auth state (multi-file auth state এর বদলে)
+// Baileys MongoDB Auth State
 async function useMongoAuthState() {
   const creds = (await readAuthData('creds')) || initAuthCreds();
 
@@ -170,12 +167,12 @@ function isWaFullyWarmedUp() {
   return isWhatsAppReady && waReadyAt > 0 && (Date.now() - waReadyAt) >= WA_WARMUP_MS;
 }
 
-// Helper: BD Phone Number to WhatsApp JID Formatter (Baileys uses @s.whatsapp.net)
+// BD ফোন নম্বরকে Baileys JID (@s.whatsapp.net) ফরম্যাটে রূপান্তর
 function formatToWhatsAppId(phone) {
   if (!phone) return null;
   let cleaned = phone.toString().replace(/[^0-9]/g, '').trim();
   if (cleaned.startsWith('880')) {
-    // already 880 format
+    // Already in 880 format
   } else if (cleaned.startsWith('01')) {
     cleaned = '88' + cleaned;
   } else if (cleaned.startsWith('1')) {
@@ -184,7 +181,7 @@ function formatToWhatsAppId(phone) {
   return cleaned + '@s.whatsapp.net';
 }
 
-// রিট্রাই + ওয়েট সহ মেসেজ সেন্ডার — ready না হওয়া পর্যন্ত পাঠানো শুরু করে না
+// বার্তা প্রেরণের ফাংশন
 async function sendWhatsAppAlert(waId, message, studentName) {
   let waited = 0;
   while (!isWaFullyWarmedUp() && waited < 30000) {
@@ -217,7 +214,7 @@ async function sendWhatsAppAlert(waId, message, studentName) {
   return false;
 }
 
-// একবারে একটাই ব্যাচের মেসেজ ক্যাম্পেইন চলবে, একাধিক /attendance/save একসাথে এলে queue হয়ে যাবে
+// কিউ প্রসেসিং
 function enqueueWaJob(jobFn) {
   waSendQueue.push(jobFn);
   processWaQueue();
@@ -244,7 +241,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 app.use(express.static(__dirname));
 
-// সেশন মিডলওয়্যার (ক্র্যাশমুক্ত কনফিগারেশন)
+// সেশন মিডলওয়্যার (ক্র্যাশমুক্ত সুরক্ষিত কনফিগারেশন)
 let sessionConfig = {
   secret: process.env.SESSION_SECRET || 'uka_secure_attendance_session_secret_2026',
   resave: false,
@@ -309,7 +306,7 @@ app.get('/logout', (req, res) => {
 });
 // =========================================================
 
-// WhatsApp Status API for Frontend AJAX Polling
+// WhatsApp Status API
 app.get('/whatsapp/status', isAuthenticated, (req, res) => {
   res.json({
     connected: isWhatsAppReady,
@@ -318,7 +315,7 @@ app.get('/whatsapp/status', isAuthenticated, (req, res) => {
   });
 });
 
-// WhatsApp Logout Endpoint
+// WhatsApp Logout
 app.post('/whatsapp/logout', isAuthenticated, async (req, res) => {
   try {
     if (sock) {
@@ -338,7 +335,7 @@ app.post('/whatsapp/logout', isAuthenticated, async (req, res) => {
   }
 });
 
-// WhatsApp Cache & Session Reset Endpoint
+// WhatsApp Reset Session
 app.post('/whatsapp/reset-cache', isAuthenticated, async (req, res) => {
   try {
     console.log('🔄 Clearing WhatsApp Session via Web Panel...');
@@ -563,7 +560,7 @@ app.get('/attendance/:batch_id/:class_number', isAuthenticated, async (req, res)
   }
 });
 
-// ১০. হাজিরা সংরক্ষণ ও সরাসরি মেসেজ প্রেরণ
+// ১০. হাজিরা সংরক্ষণ ও Baileys দিয়ে মেসেজ প্রেরণ
 app.post('/attendance/save', isAuthenticated, async (req, res) => {
   try {
     const { batch_id, class_number, class_date, attendance, send_whatsapp } = req.body;
@@ -767,7 +764,7 @@ setTimeout(() => {
   setInterval(sendSelfPing, PING_INTERVAL);
 }, 10 * 1000);
 
-// ================= Start: connect Mongo first, THEN WhatsApp socket, THEN HTTP server =================
+// ================= স্টার্টআপ লজিক =================
 const PORT = process.env.PORT || 3000;
 
 mongoose.connect(mongoURI)
