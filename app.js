@@ -79,7 +79,8 @@ const waClient = new Client({
       '--disable-extensions',
       '--disable-default-apps',
       '--mute-audio',
-      '--js-flags=--max-old-space-size=200'
+      '--renderer-process-limit=1',
+      '--js-flags=--max-old-space-size=128'
     ]
   }
 });
@@ -143,29 +144,47 @@ function formatToWhatsAppId(phone) {
   return cleaned + '@c.us';
 }
 
-// সেফ মেসেজ ডেলিভারি ফাংশন
+// র‍্যাম-ক্র্যাশ মুক্ত সরাসরি মেসেজ সেন্ডার (Puppeteer Evaluate ব্যবহার করে)
 async function sendWhatsAppAlert(waId, message, studentName) {
-  for (let attempt = 1; attempt <= 4; attempt++) {
+  for (let attempt = 1; attempt <= 3; attempt++) {
     try {
       if (!isWhatsAppReady || !waClient.pupPage) {
-        console.warn(`⏳ Waiting for WhatsApp client to be ready (Attempt ${attempt}/4)...`);
-        await new Promise(r => setTimeout(r, 4000));
+        console.warn(`⏳ Waiting for WhatsApp page sync (Attempt ${attempt}/3)...`);
+        await new Promise(r => setTimeout(r, 3000));
       }
 
-      if (waClient.pupPage) {
-        await waClient.pupPage.waitForFunction(
-          () => window.WWebJS && window.Store && window.Store.Chat,
-          { timeout: 15000 }
-        ).catch(() => console.log('Store check sync completed, sending message...'));
+      // ক্লায়েন্টের ইন্টারনাল getChat ক্র্যাশ এড়াতে ব্রাউজারের ভেতরের উইন্ডো অবজেক্ট দিয়ে ডিসপ্যাচ
+      const sent = await waClient.pupPage.evaluate(async (chatId, text) => {
+        try {
+          if (window.WWebJS && window.WWebJS.sendMessage) {
+            await window.WWebJS.sendMessage(chatId, text, {});
+            return true;
+          }
+          if (window.Store && window.Store.SendTextMsgToChat) {
+            const chat = window.Store.Chat.get(chatId) || await window.Store.Chat.find(chatId);
+            await window.Store.SendTextMsgToChat(chat, text);
+            return true;
+          }
+          return false;
+        } catch (e) {
+          return false;
+        }
+      }, waId, message);
+
+      if (sent) {
+        console.log(`✅ [Delivered] Message successfully sent to ${studentName} (${waId})`);
+        return true;
       }
 
+      // ফলব্যাক: সরাসরি লাইব্রেরির sendMessage
       await waClient.sendMessage(waId, message);
-      console.log(`✅ [Delivered] Message successfully sent to ${studentName} (${waId})`);
+      console.log(`✅ [Delivered via fallback] Message sent to ${studentName}`);
       return true;
+
     } catch (err) {
       console.warn(`⚠️ [Attempt ${attempt} Failed] for ${studentName}: ${err.message}`);
-      if (attempt < 4) {
-        await new Promise(r => setTimeout(r, 3500));
+      if (attempt < 3) {
+        await new Promise(r => setTimeout(r, 2000));
       } else {
         console.error(`❌ [Final Failure] Unable to send message to ${studentName}:`, err.message);
         return false;
@@ -181,12 +200,12 @@ app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 app.use(express.static(__dirname));
 
-// সেশন মিডলওয়্যার (ক্র্যাশমুক্ত সুরক্ষিত কনফিগারেশন)
+// সেশন মিডলওয়্যার
 let sessionConfig = {
   secret: process.env.SESSION_SECRET || 'uka_secure_attendance_session_secret_2026',
   resave: false,
   saveUninitialized: false,
-  cookie: { maxAge: 1000 * 60 * 60 * 24 * 7 } // ৭ দিন
+  cookie: { maxAge: 1000 * 60 * 60 * 24 * 7 }
 };
 
 try {
@@ -198,15 +217,9 @@ try {
       collectionName: 'sessions',
       ttl: 7 * 24 * 60 * 60
     });
-  } else if (typeof MongoStore === 'function') {
-    const SessionStore = MongoStore(session);
-    sessionConfig.store = new SessionStore({
-      mongooseConnection: mongoose.connection,
-      ttl: 7 * 24 * 60 * 60
-    });
   }
 } catch (e) {
-  console.warn('MongoStore fallback to memory store:', e.message);
+  console.warn('MongoStore notice:', e.message);
 }
 
 app.use(session(sessionConfig));
@@ -666,7 +679,7 @@ app.all('/ping', (req, res) => {
   res.status(200).send('Pong! Server is awake.');
 });
 
-// ================= ১০০% নির্ভরযোগ্য সেল্ফ-পিং সার্ভিস =================
+// সেল্ফ-পিং সার্ভিস
 const PING_INTERVAL = 3.5 * 60 * 1000;
 const TARGET_URL = 'https://uka-attendance-system.onrender.com/ping';
 
@@ -698,7 +711,6 @@ setTimeout(() => {
   sendSelfPing();
   setInterval(sendSelfPing, PING_INTERVAL);
 }, 10 * 1000);
-// ======================================================================
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Server running at http://localhost:${PORT}`));
