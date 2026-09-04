@@ -489,13 +489,24 @@ app.get('/batch/:id', isAuthenticated, async (req, res) => {
   }
 });
 
-// ৬. স্টুডেন্ট যোগ
+// ৬. স্টুডেন্ট যোগ (AJAX ও স্ট্যান্ডার্ড ফর্ম উভয়ই হ্যান্ডেল করে)
 app.post('/student/add', isAuthenticated, async (req, res) => {
   try {
     const { batch_id, name, phone } = req.body;
-    await Student.create({ batch: batch_id, name, phone });
+    const newStudent = await Student.create({ batch: batch_id, name, phone });
+
+    // যদি AJAX বা Fetch API দিয়ে রিকোয়েস্ট আসে
+    const isAjax = req.xhr || (req.headers.accept && req.headers.accept.includes('application/json'));
+    if (isAjax) {
+      return res.json({ success: true, student: newStudent });
+    }
+
     res.redirect(`/batch/${batch_id}`);
   } catch (error) {
+    const isAjax = req.xhr || (req.headers.accept && req.headers.accept.includes('application/json'));
+    if (isAjax) {
+      return res.status(500).json({ success: false, message: error.message });
+    }
     res.status(500).send('Error adding student: ' + error.message);
   }
 });
@@ -511,14 +522,24 @@ app.post('/student/edit/:id', isAuthenticated, async (req, res) => {
   }
 });
 
-// ৮. স্টুডেন্ট ডিলিট
+// ৮. স্টুডেন্ট ডিলিট (AJAX ও স্ট্যান্ডার্ড ফর্ম উভয়ই হ্যান্ডেল করে)
 app.post('/student/delete/:id', isAuthenticated, async (req, res) => {
   try {
     const { batch_id } = req.body;
     await Student.findByIdAndDelete(req.params.id);
     await Attendance.deleteMany({ student: req.params.id });
+
+    const isAjax = req.xhr || (req.headers.accept && req.headers.accept.includes('application/json'));
+    if (isAjax) {
+      return res.json({ success: true });
+    }
+
     res.redirect(`/batch/${batch_id}`);
   } catch (error) {
+    const isAjax = req.xhr || (req.headers.accept && req.headers.accept.includes('application/json'));
+    if (isAjax) {
+      return res.status(500).json({ success: false, message: error.message });
+    }
     res.status(500).send('Error deleting student: ' + error.message);
   }
 });
@@ -560,7 +581,7 @@ app.get('/attendance/:batch_id/:class_number', isAuthenticated, async (req, res)
   }
 });
 
-// ১০. হাজিরা সংরক্ষণ ও Baileys দিয়ে মেসেজ প্রেরণ
+// ১০. হাজিরা সংরক্ষণ ও Baileys দিয়ে মেসেজ প্রেরণ
 app.post('/attendance/save', isAuthenticated, async (req, res) => {
   try {
     const { batch_id, class_number, class_date, attendance, send_whatsapp } = req.body;
