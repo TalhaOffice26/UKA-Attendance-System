@@ -4,6 +4,7 @@ const session = require('express-session');
 const mongoose = require('mongoose');
 const path = require('path');
 const fs = require('fs');
+const https = require('https');
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const QRCode = require('qrcode');
 
@@ -63,6 +64,10 @@ const waClient = new Client({
     clientId: "uka_session",
     dataPath: path.join(__dirname, '.wwebjs_auth')
   }),
+  webVersionCache: {
+    type: 'remote',
+    remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-js/main/dist/wppconnect-wa.js'
+  },
   puppeteer: {
     headless: true,
     ...(browserPath ? { executablePath: browserPath } : {}),
@@ -78,15 +83,8 @@ const waClient = new Client({
       '--disable-extensions',
       '--disable-default-apps',
       '--mute-audio',
-      '--blink-settings=imagesEnabled=false',
-      '--disable-background-networking',
-      '--disable-sync',
-      '--disable-translate',
-      '--hide-scrollbars',
-      '--metrics-recording-only',
-      '--no-default-browser-check',
-      '--safebrowsing-disable-auto-update',
-      '--js-flags=--max-old-space-size=160'
+      '--disable-features=Translate,OptimizationHints',
+      '--js-flags=--max-old-space-size=256'
     ]
   }
 });
@@ -101,7 +99,6 @@ waClient.on('qr', async (qr) => {
   }
 });
 
-// স্ক্যান শেষ হওয়া মাত্রই QR মুছে যাবে এবং স্ট্যাটাস কানেক্টেড দেখাবে
 waClient.on('authenticated', () => {
   console.log('🔐 WhatsApp Authenticated successfully!');
   currentQRCodeDataUrl = null;
@@ -137,12 +134,12 @@ waClient.initialize().catch(err => {
   console.error('Initial WhatsApp launch error:', err);
 });
 
-// Helper: Phone Number Formatter
+// Helper: BD Phone Number to WhatsApp ID Formatter
 function formatToWhatsAppId(phone) {
   if (!phone) return null;
   let cleaned = phone.toString().replace(/[^0-9]/g, '').trim();
   if (cleaned.startsWith('880')) {
-    // ok
+    // Already in 880 format
   } else if (cleaned.startsWith('01')) {
     cleaned = '88' + cleaned;
   } else if (cleaned.startsWith('1')) {
@@ -151,19 +148,24 @@ function formatToWhatsAppId(phone) {
   return cleaned + '@c.us';
 }
 
-// সেফ মেসেজ ডেলিভারি ফাংশন
-async function safeSendMessage(waId, message, studentName) {
+// নির্ভরযোগ্য মেসেজ সেন্ডার (অটো রিট্রাই ও এরর হ্যান্ডলিং সহ)
+async function sendWhatsAppAlert(waId, message, studentName) {
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
+      if (!isWhatsAppReady) {
+        console.warn(`⏳ Waiting for WhatsApp client to be ready (Attempt ${attempt}/3)...`);
+        await new Promise(r => setTimeout(r, 2500));
+      }
+
       await waClient.sendMessage(waId, message);
-      console.log(`✅ Message successfully delivered to: ${studentName}`);
+      console.log(`✅ [Delivered] Message successfully sent to ${studentName} (${waId})`);
       return true;
     } catch (err) {
-      console.warn(`⚠️ Attempt ${attempt} error for ${studentName}: ${err.message}`);
+      console.warn(`⚠️ [Attempt ${attempt} Failed] for ${studentName}: ${err.message}`);
       if (attempt < 3) {
         await new Promise(r => setTimeout(r, 2000));
       } else {
-        console.error(`❌ Final Send Error to ${studentName}:`, err.message);
+        console.error(`❌ [Final Failure] Unable to send message to ${studentName}:`, err.message);
         return false;
       }
     }
@@ -469,14 +471,14 @@ app.get('/attendance/:batch_id/:class_number', isAuthenticated, async (req, res)
   }
 });
 
-// ১০. হাজিরা সংরক্ষণ ও সরাসরি ব্যাকগ্রাউন্ড মেসেজ প্রেরণ
+// ১০. হাজিরা সংরক্ষণ ও সরাসরি মেসেজ প্রেরণ
 app.post('/attendance/save', isAuthenticated, async (req, res) => {
   try {
     const { batch_id, class_number, class_date, attendance, send_whatsapp } = req.body;
     const batch = await Batch.findById(batch_id);
     const classNum = Number(class_number);
     
-    const shouldSend = (send_whatsapp === 'on' || send_whatsapp === 'true');
+    const shouldSend = (send_whatsapp === 'on' || send_whatsapp === 'true' || send_whatsapp === true);
 
     await Attendance.deleteMany({ batch: batch_id, classNumber: classNum });
 
@@ -491,10 +493,11 @@ app.post('/attendance/save', isAuthenticated, async (req, res) => {
       }));
       await Attendance.insertMany(recordsToInsert);
 
+      console.log(`\n📌 [Save Request] Batch: ${batch.name}, Class: ${classNum}, Trigger Send: ${shouldSend}`);
+
       if (shouldSend) {
         (async () => {
           try {
-            console.log(`\n🚀 Starting WhatsApp message queue for Batch: ${batch.name}, Class: ${classNum}`);
             const studentIds = Object.keys(attendance);
             const students = await Student.find({ _id: { $in: studentIds } });
             const allPastRecords = await Attendance.find({ 
@@ -536,13 +539,13 @@ app.post('/attendance/save', isAuthenticated, async (req, res) => {
               }
 
               if (msg) {
-                console.log(`📨 Sending WhatsApp alert to ${cleanName} (${waId})...`);
-                await safeSendMessage(waId, msg, cleanName);
+                console.log(`📨 Initiating WhatsApp send to ${cleanName} (${waId})...`);
+                await sendWhatsAppAlert(waId, msg, cleanName);
                 await new Promise(r => setTimeout(r, 1500));
               }
             }
           } catch (bgError) {
-            console.error('Background message error:', bgError);
+            console.error('Background message delivery error:', bgError);
           }
         })();
       }
@@ -635,19 +638,44 @@ app.get('/report/full/:batch_id', isAuthenticated, async (req, res) => {
 });
 
 // হেলথ চেক রাউট
-app.get('/ping', (req, res) => {
+app.all('/ping', (req, res) => {
   res.status(200).send('Pong! Server is awake.');
 });
 
-// সেল্ফ-পিং সার্ভিস
-const SERVER_URL = process.env.RENDER_EXTERNAL_URL;
-if (SERVER_URL) {
-  setInterval(() => {
-    fetch(`${SERVER_URL}/ping`)
-      .then(() => console.log('⏰ Keep-Alive self-ping sent successfully'))
-      .catch(err => console.error('Keep-Alive ping error:', err.message));
-  }, 10 * 60 * 1000);
+// ================= ১০০% নির্ভরযোগ্য সেল্ফ-পিং সার্ভিস =================
+const PING_INTERVAL = 3.5 * 60 * 1000; // প্রতি ৩ মিনিট ৩০ সেকেন্ড পর পর পিং করবে
+const TARGET_URL = 'https://uka-attendance-system.onrender.com/ping';
+
+function sendSelfPing() {
+  const req = https.get(TARGET_URL, {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+      'Accept': '*/*'
+    },
+    timeout: 10000
+  }, (res) => {
+    res.on('data', () => {});
+    res.on('end', () => {
+      console.log(`⏰ [Keep-Alive] Ping success! Status: ${res.statusCode} at ${new Date().toLocaleTimeString('en-US', { timeZone: 'Asia/Dhaka' })}`);
+    });
+  });
+
+  req.on('timeout', () => {
+    req.destroy();
+    console.warn('⏰ [Keep-Alive] Ping timed out, socket reset.');
+  });
+
+  req.on('error', (err) => {
+    console.error('⏰ [Keep-Alive] Ping request error:', err.message);
+  });
 }
+
+// সার্ভার স্টার্টের ১০ সেকেন্ড পর প্রথম পিং এবং পরবর্তীতে নির্ধারিত বিরতিতে চলবে
+setTimeout(() => {
+  sendSelfPing();
+  setInterval(sendSelfPing, PING_INTERVAL);
+}, 10 * 1000);
+// ======================================================================
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Server running at http://localhost:${PORT}`));
