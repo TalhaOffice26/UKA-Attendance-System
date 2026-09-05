@@ -1477,7 +1477,7 @@ app.post('/attendance/save', isAuthenticated, async (req, res) => {
 
             // ২. প্রিন্সিপাল স্যারের নম্বরে সম্পূর্ণ ক্লাসের সামারি প্রদান
             // .env-তে থাকলে সেটা নিবে, না থাকলে আপনার উল্লেখিত "01773275698" ফলব্যাক হিসেবে সরাসরি কাজ করবে
-            const principalPhone = process.env.PRINCIPAL_PHONE || '01773275698';
+            const principalPhone = process.env.PRINCIPAL_PHONE;
             if (principalPhone) {
               const principalWaId = formatToWhatsAppId(principalPhone);
               if (principalWaId) {
